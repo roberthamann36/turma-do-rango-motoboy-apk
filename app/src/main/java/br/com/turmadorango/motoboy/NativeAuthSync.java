@@ -61,6 +61,15 @@ public final class NativeAuthSync {
         instance.main.post(instance::sync);
     }
 
+    private void retrySoon() {
+        main.removeCallbacks(retryRunnable);
+        main.postDelayed(retryRunnable, RETRY_MS);
+    }
+
+    private final Runnable retryRunnable = new Runnable() {
+        @Override public void run() { sync(); }
+    };
+
     private void sync() {
         if (syncing) return;
 
@@ -75,7 +84,7 @@ public final class NativeAuthSync {
                     .putString("native_auth_state", "aguardando_sessao")
                     .putLong("native_auth_checked_at", System.currentTimeMillis())
                     .apply();
-            main.postDelayed(this::sync, RETRY_MS);
+            retrySoon();
             return;
         }
 
@@ -83,6 +92,7 @@ public final class NativeAuthSync {
         final String sessionCookie = cookie;
         new Thread(() -> {
             HttpURLConnection conn = null;
+            boolean shouldRetry = false;
             try {
                 URL url = new URL(TOKEN_URL + "?native=1&t=" + System.currentTimeMillis());
                 conn = (HttpURLConnection) url.openConnection();
@@ -100,6 +110,7 @@ public final class NativeAuthSync {
                             .putString("native_auth_state", "http_" + code)
                             .putLong("native_auth_checked_at", System.currentTimeMillis())
                             .apply();
+                    shouldRetry = true;
                     return;
                 }
 
@@ -117,6 +128,7 @@ public final class NativeAuthSync {
                             .putString("native_auth_state", "resposta_invalida")
                             .putLong("native_auth_checked_at", System.currentTimeMillis())
                             .apply();
+                    shouldRetry = true;
                     return;
                 }
 
@@ -129,15 +141,18 @@ public final class NativeAuthSync {
                         .putLong("native_auth_checked_at", System.currentTimeMillis())
                         .apply();
 
+                main.removeCallbacks(retryRunnable);
                 DeliveryCallManager.kick(app);
             } catch (Exception e) {
                 prefs.edit()
                         .putString("native_auth_state", "erro_rede")
                         .putLong("native_auth_checked_at", System.currentTimeMillis())
                         .apply();
+                shouldRetry = true;
             } finally {
                 if (conn != null) conn.disconnect();
                 syncing = false;
+                if (shouldRetry) main.post(this::retrySoon);
             }
         }, "tdr-native-auth-sync").start();
     }
