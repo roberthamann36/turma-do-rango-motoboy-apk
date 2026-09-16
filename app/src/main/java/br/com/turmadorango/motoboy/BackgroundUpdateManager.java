@@ -33,7 +33,7 @@ public final class BackgroundUpdateManager {
     private static final String UPDATE_URL = "https://turmadorango.com.br/includes/motoboy/app-version.php";
     private static final String PREFS = "tdr_bg_update";
     private static final String CHANNEL = "tdr_motoboy_updates_v2";
-    private static final long CHECK_INTERVAL = 10 * 60 * 1000L;
+    private static final long CHECK_INTERVAL = 2 * 60 * 1000L;
     private static BackgroundUpdateManager instance;
 
     private final Context app;
@@ -65,7 +65,7 @@ public final class BackgroundUpdateManager {
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         createChannel();
         registerReceiver();
-        handler.postDelayed(checkRunnable, 12000L);
+        handler.postDelayed(checkRunnable, 5000L);
         long existing = prefs.getLong("download_id", -1L);
         if (existing > 0) handler.postDelayed(() -> inspectExisting(existing), 2500L);
     }
@@ -78,6 +78,7 @@ public final class BackgroundUpdateManager {
         start(activity.getApplicationContext());
         if (instance == null) return;
         instance.resumedActivity = new WeakReference<>(activity);
+        instance.checkNow();
         long ready = instance.prefs.getLong("ready_download_id", -1L);
         if (ready > 0) instance.handler.postDelayed(() -> instance.tryInstall(activity, ready), 550L);
     }
@@ -218,8 +219,8 @@ public final class BackgroundUpdateManager {
                     : new Notification.Builder(app);
             b.setSmallIcon(R.drawable.ic_launcher)
                     .setContentTitle("Atualização " + version + " baixada")
-                    .setContentText("O download foi feito em segundo plano. Abra o app para concluir a instalação.")
-                    .setStyle(new Notification.BigTextStyle().bigText("A atualização foi baixada automaticamente. Ao abrir o aplicativo, o instalador do Android será exibido."))
+                    .setContentText("A atualização foi baixada. Abra o app para concluir a instalação.")
+                    .setStyle(new Notification.BigTextStyle().bigText("O download foi concluído automaticamente em segundo plano. Quando o aplicativo estiver aberto, o Android iniciará a instalação."))
                     .setContentIntent(pi)
                     .setAutoCancel(true);
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) b.setPriority(Notification.PRIORITY_DEFAULT);
