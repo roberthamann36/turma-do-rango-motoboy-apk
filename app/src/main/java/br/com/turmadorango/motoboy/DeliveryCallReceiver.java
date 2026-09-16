@@ -29,6 +29,7 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
         final String token = intent.getStringExtra("token");
         final String action = ACTION_ACCEPT.equals(a) ? "accept" : "decline";
 
+        NativeCallService.stopCurrentAlert(app, callId);
         DeliveryCallManager.stopCurrentAlert(app, callId);
         new Thread(() -> {
             try { respond(app, callId, token == null ? "" : token, action); }
@@ -55,13 +56,15 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
                     .getString("app_token", "").trim();
             if (!appToken.isEmpty()) {
                 conn.setRequestProperty("X-TDR-App-Token", appToken);
+                conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
             } else {
                 String cookie = CookieManager.getInstance().getCookie("https://turmadorango.com.br/includes/motoboy/");
                 if (cookie != null && !cookie.trim().isEmpty()) conn.setRequestProperty("Cookie", cookie);
             }
 
             String body = "call_id=" + URLEncoder.encode(String.valueOf(callId), "UTF-8")
-                    + "&token=" + URLEncoder.encode(offerToken, "UTF-8");
+                    + "&token=" + URLEncoder.encode(offerToken, "UTF-8")
+                    + "&app_version=" + URLEncoder.encode(BuildConfig.VERSION_NAME, "UTF-8");
             if (!appToken.isEmpty()) {
                 body += "&app_token=" + URLEncoder.encode(appToken, "UTF-8");
             }
@@ -103,7 +106,7 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
                     "Confira a internet e tente novamente se a chamada ainda estiver disponível.");
         } finally {
             if (conn != null) conn.disconnect();
-            DeliveryCallManager.kick(context);
+            NativeCallService.start(context);
         }
     }
 }
