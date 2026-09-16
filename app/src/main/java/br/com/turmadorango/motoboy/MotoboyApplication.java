@@ -33,6 +33,8 @@ public class MotoboyApplication extends Application implements Application.Activ
         IntentFilter f = new IntentFilter(RealtimeService.ACTION_CHANGED);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(realtimeReceiver, f, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(realtimeReceiver, f);
+
+        NativeAuthSync.start(this);
         DeliveryCallManager.start(this);
         BackgroundUpdateManager.start(this);
     }
@@ -83,6 +85,8 @@ public class MotoboyApplication extends Application implements Application.Activ
     @Override public void onActivityResumed(Activity activity) {
         resumedActivity = activity;
         BackgroundUpdateManager.onActivityResumed(activity);
+        NativeAuthSync.syncNow(this);
+        DeliveryCallManager.kick(this);
         if (activity instanceof MainActivity) {
             CommunicationGuard.install(activity);
         }
@@ -101,6 +105,8 @@ public class MotoboyApplication extends Application implements Application.Activ
     @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
         if (activity instanceof MainActivity) {
             handler.post(() -> CommunicationGuard.install(activity));
+            handler.postDelayed(() -> NativeAuthSync.syncNow(this), 1200L);
+            handler.postDelayed(() -> DeliveryCallManager.kick(this), 1500L);
         }
     }
 
