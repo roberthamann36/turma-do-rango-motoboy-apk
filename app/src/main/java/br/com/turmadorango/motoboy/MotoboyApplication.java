@@ -83,16 +83,27 @@ public class MotoboyApplication extends Application implements Application.Activ
     @Override public void onActivityResumed(Activity activity) {
         resumedActivity = activity;
         BackgroundUpdateManager.onActivityResumed(activity);
+        if (activity instanceof MainActivity) {
+            CommunicationGuard.install(activity);
+        }
         refreshVisibleWebView();
     }
+
     @Override public void onActivityPaused(Activity activity) {
         BackgroundUpdateManager.onActivityPaused(activity);
         if (resumedActivity == activity) resumedActivity = null;
     }
+
     @Override public void onActivityDestroyed(Activity activity) {
         if (resumedActivity == activity) resumedActivity = null;
     }
-    @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {}
+
+    @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
+        if (activity instanceof MainActivity) {
+            handler.post(() -> CommunicationGuard.install(activity));
+        }
+    }
+
     @Override public void onActivityStarted(Activity activity) {}
     @Override public void onActivityStopped(Activity activity) {}
     @Override public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
