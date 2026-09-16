@@ -24,12 +24,13 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public final class DeliveryCallManager {
     static final String CALL_URL = "https://turmadorango.com.br/includes/motoboy/chamado_api.php";
-    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v4";
+    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v5";
     private static final long POLL_MS = 1200L;
     private static DeliveryCallManager instance;
     private static MediaPlayer callPlayer;
@@ -86,7 +87,13 @@ public final class DeliveryCallManager {
     private long pollOnce() throws Exception {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(CALL_URL + "?action=current&t=" + System.currentTimeMillis());
+            String token = appToken();
+            String endpoint = CALL_URL + "?action=current&t=" + System.currentTimeMillis();
+            if (!token.isEmpty()) {
+                endpoint += "&app_token=" + URLEncoder.encode(token, "UTF-8");
+            }
+
+            URL url = new URL(endpoint);
             conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(6500);
             conn.setReadTimeout(6500);
@@ -94,7 +101,6 @@ public final class DeliveryCallManager {
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
 
-            String token = appToken();
             if (!token.isEmpty()) {
                 conn.setRequestProperty("X-TDR-App-Token", token);
             } else {
@@ -105,7 +111,7 @@ public final class DeliveryCallManager {
             int code = conn.getResponseCode();
             if (code == 401 || code == 403) {
                 clearCurrentNotification();
-                return token.isEmpty() ? 2500L : 4000L;
+                return token.isEmpty() ? 1800L : 3000L;
             }
             if (code < 200 || code >= 300) return 3000L;
 
@@ -114,12 +120,14 @@ public final class DeliveryCallManager {
                 String line;
                 while ((line = r.readLine()) != null) body.append(line);
             }
+
             JSONObject data = new JSONObject(body.toString());
             JSONObject offer = data.optJSONObject("offer");
             if (!data.optBoolean("ok", false) || offer == null || offer.optInt("id", 0) <= 0) {
                 clearCurrentNotification();
                 return POLL_MS;
             }
+
             showOffer(offer);
             return POLL_MS;
         } finally {
@@ -209,9 +217,12 @@ public final class DeliveryCallManager {
             b.setDefaults(Notification.DEFAULT_ALL);
         }
 
-        ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
-                .notify(notificationId(callId), b.build());
+        // O toque/vibração não depende da permissão de notificação do Android.
         startCallAlert(context);
+        try {
+            ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
+                    .notify(notificationId(callId), b.build());
+        } catch (Exception ignored) {}
 
         final int expectedCall = callId;
         handler.postDelayed(() -> {
@@ -250,7 +261,9 @@ public final class DeliveryCallManager {
 
     private void clearCurrentNotification() {
         if (currentCallId > 0) {
-            ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(notificationId(currentCallId));
+            try {
+                ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(notificationId(currentCallId));
+            } catch (Exception ignored) {}
         }
         currentCallId = 0;
         currentToken = "";
@@ -334,6 +347,6 @@ public final class DeliveryCallManager {
             b.setPriority(Notification.PRIORITY_HIGH);
             b.setDefaults(Notification.DEFAULT_ALL);
         }
-        nm.notify(69001, b.build());
+        try { nm.notify(69001, b.build()); } catch (Exception ignored) {}
     }
 }
