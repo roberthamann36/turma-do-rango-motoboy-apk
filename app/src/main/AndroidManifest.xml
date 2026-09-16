@@ -29,6 +29,16 @@
                 android:value="Real-time monitoring of assigned courier deliveries, status changes, delivery offers and customer/store messages" />
         </service>
 
+        <service
+            android:name=".NativeCallService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Persistent courier delivery call monitor that alerts an online courier about a time-limited delivery offer" />
+        </service>
+
         <receiver
             android:name=".DeliveryCallReceiver"
             android:exported="false" />
