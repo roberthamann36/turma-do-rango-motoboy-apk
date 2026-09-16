@@ -34,6 +34,20 @@
             android:exported="false" />
 
         <activity
+            android:name=".AppAuthActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tdrapp" android:host="auth" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".DeliveryCallActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|uiMode"
             android:excludeFromRecents="true"
