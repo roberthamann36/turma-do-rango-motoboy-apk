@@ -29,6 +29,8 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
         final String token = intent.getStringExtra("token");
         final String action = ACTION_ACCEPT.equals(a) ? "accept" : "decline";
 
+        DeliveryCallManager.stopCurrentAlert(app, callId);
+
         new Thread(() -> {
             try { respond(app, callId, token == null ? "" : token, action); }
             finally { pending.finish(); }
