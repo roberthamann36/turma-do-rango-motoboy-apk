@@ -35,6 +35,7 @@ public class DeliveryCallActivity extends Activity {
         configureCallWindow();
 
         readIntent(getIntent());
+        CallOverlayManager.hide(this, callId);
         if (callId <= 0 || token == null || token.isEmpty()) {
             finish();
             return;
@@ -53,6 +54,7 @@ public class DeliveryCallActivity extends Activity {
         setIntent(intent);
         configureCallWindow();
         readIntent(intent);
+        CallOverlayManager.hide(this, callId);
         answered = false;
         setContentView(buildUi());
         startTimer();
@@ -256,7 +258,6 @@ public class DeliveryCallActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        // A chamada deve ficar sobre a tela até aceitar, passar ou o tempo acabar.
         if (answered) super.onBackPressed();
     }
 
