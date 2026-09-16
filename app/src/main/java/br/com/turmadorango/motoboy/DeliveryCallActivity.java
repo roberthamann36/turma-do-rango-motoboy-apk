@@ -11,6 +11,9 @@ import android.os.CountDownTimer;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -29,12 +32,7 @@ public class DeliveryCallActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (Build.VERSION.SDK_INT >= 27) {
-            setShowWhenLocked(true);
-            setTurnScreenOn(true);
-        }
-        getWindow().setStatusBarColor(Color.BLACK);
-        getWindow().setNavigationBarColor(Color.BLACK);
+        configureCallWindow();
 
         readIntent(getIntent());
         if (callId <= 0 || token == null || token.isEmpty()) {
@@ -45,13 +43,53 @@ public class DeliveryCallActivity extends Activity {
         startTimer();
     }
 
+    @Override protected void onResume() {
+        super.onResume();
+        configureCallWindow();
+    }
+
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        configureCallWindow();
         readIntent(intent);
         answered = false;
         setContentView(buildUi());
         startTimer();
+    }
+
+    private void configureCallWindow() {
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        }
+
+        getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                        | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                        | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                        | WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+        getWindow().setStatusBarColor(Color.BLACK);
+        getWindow().setNavigationBarColor(Color.BLACK);
+
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
     }
 
     private void readIntent(Intent i) {
@@ -83,11 +121,14 @@ public class DeliveryCallActivity extends Activity {
         badgeBg.setColor(0xFFFFC400);
         badgeBg.setCornerRadius(dp(50));
         badge.setBackground(badgeBg);
-        card.addView(badge, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(badge, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = text("🏍 CHAMADA DE ENTREGA", 25, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams titleLp = lpMatch(); titleLp.topMargin = dp(20);
+        LinearLayout.LayoutParams titleLp = lpMatch();
+        titleLp.topMargin = dp(20);
         card.addView(title, titleLp);
 
         String street = getIntent().getStringExtra("rua");
@@ -97,29 +138,39 @@ public class DeliveryCallActivity extends Activity {
 
         TextView address = text("📍 " + street, 21, Color.WHITE, true);
         address.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams aLp = lpMatch(); aLp.topMargin = dp(28);
+        LinearLayout.LayoutParams aLp = lpMatch();
+        aLp.topMargin = dp(28);
         card.addView(address, aLp);
 
         TextView neighborhood = text("🏘 " + district, 18, 0xFFCCCCCC, false);
         neighborhood.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams nLp = lpMatch(); nLp.topMargin = dp(9);
+        LinearLayout.LayoutParams nLp = lpMatch();
+        nLp.topMargin = dp(9);
         card.addView(neighborhood, nLp);
 
-        TextView hint = text("Aceite antes do tempo acabar. Se não aceitar, a chamada seguirá para o próximo motoboy online.", 14, 0xFFAAAAAA, false);
+        TextView hint = text(
+                "Aceite antes do tempo acabar. Se não aceitar, a chamada seguirá para o próximo motoboy online.",
+                14,
+                0xFFAAAAAA,
+                false);
         hint.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams hLp = lpMatch(); hLp.topMargin = dp(22);
+        LinearLayout.LayoutParams hLp = lpMatch();
+        hLp.topMargin = dp(22);
         card.addView(hint, hLp);
 
         timerBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         timerBar.setMax(totalSeconds);
         timerBar.setProgress(totalSeconds);
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12));
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(12));
         barLp.topMargin = dp(22);
         card.addView(timerBar, barLp);
 
         timerText = text(totalSeconds + "s", 34, 0xFFFFC400, true);
         timerText.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams tLp = lpMatch(); tLp.topMargin = dp(8);
+        LinearLayout.LayoutParams tLp = lpMatch();
+        tLp.topMargin = dp(8);
         card.addView(timerText, tLp);
 
         Button accept = new Button(this);
@@ -132,7 +183,9 @@ public class DeliveryCallActivity extends Activity {
         acceptBg.setCornerRadius(dp(16));
         accept.setBackground(acceptBg);
         accept.setOnClickListener(v -> respond(true));
-        LinearLayout.LayoutParams acceptLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58));
+        LinearLayout.LayoutParams acceptLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(58));
         acceptLp.topMargin = dp(22);
         card.addView(accept, acceptLp);
 
@@ -147,16 +200,21 @@ public class DeliveryCallActivity extends Activity {
         declineBg.setStroke(dp(1), 0xFF555555);
         decline.setBackground(declineBg);
         decline.setOnClickListener(v -> respond(false));
-        LinearLayout.LayoutParams declineLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        LinearLayout.LayoutParams declineLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(54));
         declineLp.topMargin = dp(12);
         card.addView(decline, declineLp);
 
         TextView footer = text("Turma do Rango • Motoboy", 13, 0xFF777777, false);
         footer.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams fLp = lpMatch(); fLp.topMargin = dp(20);
+        LinearLayout.LayoutParams fLp = lpMatch();
+        fLp.topMargin = dp(20);
         card.addView(footer, fLp);
 
-        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
         cardLp.gravity = Gravity.CENTER;
         root.addView(card, cardLp);
         return root;
@@ -170,8 +228,12 @@ public class DeliveryCallActivity extends Activity {
                 if (timerText != null) timerText.setText(s + "s");
                 if (timerBar != null) timerBar.setProgress(s);
             }
+
             @Override public void onFinish() {
-                if (!answered) finish();
+                if (!answered) {
+                    DeliveryCallManager.stopCurrentAlert(DeliveryCallActivity.this, callId);
+                    finish();
+                }
             }
         }.start();
     }
@@ -180,13 +242,22 @@ public class DeliveryCallActivity extends Activity {
         if (answered) return;
         answered = true;
         if (timer != null) timer.cancel();
+        DeliveryCallManager.stopCurrentAlert(this, callId);
+
         Intent i = new Intent(this, DeliveryCallReceiver.class);
-        i.setAction(accept ? DeliveryCallReceiver.ACTION_ACCEPT : DeliveryCallReceiver.ACTION_DECLINE);
+        i.setAction(accept
+                ? DeliveryCallReceiver.ACTION_ACCEPT
+                : DeliveryCallReceiver.ACTION_DECLINE);
         i.putExtra("call_id", callId);
         i.putExtra("pedido_id", pedidoId);
         i.putExtra("token", token);
         sendBroadcast(i);
         finish();
+    }
+
+    @Override public void onBackPressed() {
+        // A chamada deve ficar sobre a tela até aceitar, passar ou o tempo acabar.
+        if (answered) super.onBackPressed();
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
@@ -199,7 +270,9 @@ public class DeliveryCallActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams lpMatch() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        return new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     private int dp(int v) {
