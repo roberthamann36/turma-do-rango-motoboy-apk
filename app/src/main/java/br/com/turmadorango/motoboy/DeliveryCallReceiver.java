@@ -62,6 +62,10 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
 
             String body = "call_id=" + URLEncoder.encode(String.valueOf(callId), "UTF-8")
                     + "&token=" + URLEncoder.encode(offerToken, "UTF-8");
+            if (!appToken.isEmpty()) {
+                body += "&app_token=" + URLEncoder.encode(appToken, "UTF-8");
+            }
+
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(body.getBytes(StandardCharsets.UTF_8));
             }
