@@ -33,6 +33,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         IntentFilter f = new IntentFilter(RealtimeService.ACTION_CHANGED);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(realtimeReceiver, f, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(realtimeReceiver, f);
+        DeliveryCallManager.start(this);
     }
 
     private void refreshVisibleWebView() {
