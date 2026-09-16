@@ -2,6 +2,8 @@ name: Gerar APK Motoboy
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -30,15 +32,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Gerar APK instalável
-        run: gradle --no-daemon assembleDebug
+      - name: Gerar APK release sem assinatura
+        run: gradle --no-daemon assembleRelease
 
-      - name: Renomear APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk TurmaDoRango-Motoboy.apk
+      - name: Preparar artefatos
+        run: |
+          mkdir -p build-output
+          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/TurmaDoRango-Motoboy-unsigned.apk
+          cp /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar build-output/apksigner.jar
+          cp /usr/local/lib/android/sdk/build-tools/35.0.0/zipalign build-output/zipalign
+          chmod +x build-output/zipalign
 
-      - name: Publicar APK
+      - name: Publicar APK e ferramentas
         uses: actions/upload-artifact@v4
         with:
-          name: TurmaDoRango-Motoboy-APK
-          path: TurmaDoRango-Motoboy.apk
+          name: TurmaDoRango-Motoboy-RELEASE
+          path: build-output/
           if-no-files-found: error
