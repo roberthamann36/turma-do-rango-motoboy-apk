@@ -15,17 +15,13 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Monitor leve de chamadas que roda no MESMO processo mantido vivo pelo
- * RealtimeService. Não cria um segundo foreground service.
- *
- * O endpoint app_call_poll.php mantém app_online_at atualizado. Quando existe
- * uma oferta para este motoboy, o monitor acorda o DeliveryCallManager, que
- * faz o toque/vibração e abre a tela de aceitar/passar.
+ * ÚNICO monitor de chamadas. Consulta app_call_poll.php e entrega a oferta
+ * diretamente ao DeliveryCallManager, sem iniciar outro polling paralelo.
  */
 public final class EmbeddedCallMonitor {
     private static final String POLL_URL =
             "https://turmadorango.com.br/includes/motoboy/app_call_poll.php";
-    private static final long POLL_MS = 750L;
+    private static final long POLL_MS = 700L;
     private static EmbeddedCallMonitor instance;
 
     private final Context app;
@@ -38,7 +34,7 @@ public final class EmbeddedCallMonitor {
         @Override public void run() {
             if (!running) return;
             if (working) {
-                handler.postDelayed(this, 250L);
+                handler.postDelayed(this, 220L);
                 return;
             }
 
@@ -49,11 +45,11 @@ public final class EmbeddedCallMonitor {
                     next = pollOnce();
                 } catch (Exception ignored) {
                     saveState("erro_rede");
-                    next = 1600L;
+                    next = 1500L;
                 } finally {
                     working = false;
                     if (running) {
-                        handler.postDelayed(pollRunnable, Math.max(550L, next));
+                        handler.postDelayed(pollRunnable, Math.max(500L, next));
                     }
                 }
             }, "tdr-embedded-call-monitor").start();
@@ -69,14 +65,14 @@ public final class EmbeddedCallMonitor {
         if (instance == null) instance = new EmbeddedCallMonitor(context);
         instance.running = true;
         instance.handler.removeCallbacks(instance.pollRunnable);
-        instance.handler.postDelayed(instance.pollRunnable, 250L);
+        instance.handler.postDelayed(instance.pollRunnable, 180L);
     }
 
     public static synchronized void kick(Context context) {
         start(context);
         if (instance != null) {
             instance.handler.removeCallbacks(instance.pollRunnable);
-            instance.handler.postDelayed(instance.pollRunnable, 40L);
+            instance.handler.postDelayed(instance.pollRunnable, 30L);
         }
     }
 
@@ -96,7 +92,7 @@ public final class EmbeddedCallMonitor {
         if (appToken.isEmpty()) {
             saveState("aguardando_token");
             NativeAuthSync.syncNow(app);
-            return 1000L;
+            return 900L;
         }
 
         HttpURLConnection conn = null;
@@ -118,13 +114,14 @@ public final class EmbeddedCallMonitor {
 
             int code = conn.getResponseCode();
             if (code == 401 || code == 403) {
+                DeliveryCallManager.clearCurrent(app);
                 saveState("reautenticando");
                 NativeAuthSync.invalidateAndSync(app);
-                return 1000L;
+                return 900L;
             }
             if (code < 200 || code >= 300) {
                 saveState("http_" + code);
-                return 1600L;
+                return 1500L;
             }
 
             StringBuilder body = new StringBuilder();
@@ -136,9 +133,10 @@ public final class EmbeddedCallMonitor {
 
             JSONObject data = new JSONObject(body.toString());
             if (!data.optBoolean("ok", false) || !data.optBoolean("logged", false)) {
+                DeliveryCallManager.clearCurrent(app);
                 saveState("resposta_nao_autenticada");
                 NativeAuthSync.invalidateAndSync(app);
-                return 1000L;
+                return 900L;
             }
 
             auth.edit()
@@ -151,12 +149,12 @@ public final class EmbeddedCallMonitor {
             if (offer != null
                     && offer.optInt("id", 0) > 0
                     && !offer.optString("token", "").isEmpty()) {
-                // Acorda imediatamente o módulo que toca/vibra e mostra a chamada.
-                DeliveryCallManager.kick(app);
-                return 550L;
+                DeliveryCallManager.presentOffer(app, offer);
+                return 500L;
             }
 
-            return Math.max(550L, data.optLong("poll_ms", POLL_MS));
+            DeliveryCallManager.clearCurrent(app);
+            return Math.max(500L, data.optLong("poll_ms", POLL_MS));
         } finally {
             if (conn != null) conn.disconnect();
         }
