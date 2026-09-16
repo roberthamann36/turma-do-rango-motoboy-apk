@@ -29,7 +29,6 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
         final String token = intent.getStringExtra("token");
         final String action = ACTION_ACCEPT.equals(a) ? "accept" : "decline";
 
-        NativeCallService.stopCurrentAlert(app, callId);
         DeliveryCallManager.stopCurrentAlert(app, callId);
         new Thread(() -> {
             try { respond(app, callId, token == null ? "" : token, action); }
@@ -96,17 +95,24 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
                 changed.putExtra("revision", "call-accepted-" + callId);
                 context.sendBroadcast(changed);
             } else if (data.optBoolean("ok", false)) {
-                DeliveryCallManager.showResultNotification(context, "Chamada passada", "A entrega foi enviada para o próximo motoboy online.");
+                DeliveryCallManager.showResultNotification(
+                        context,
+                        "Chamada passada",
+                        "A entrega foi enviada para o próximo motoboy online.");
             } else {
-                DeliveryCallManager.showResultNotification(context, "Chamada encerrada",
+                DeliveryCallManager.showResultNotification(
+                        context,
+                        "Chamada encerrada",
                         data.optString("message", "Esta chamada já não está disponível."));
             }
         } catch (Exception e) {
-            DeliveryCallManager.showResultNotification(context, "Falha ao responder",
+            DeliveryCallManager.showResultNotification(
+                    context,
+                    "Falha ao responder",
                     "Confira a internet e tente novamente se a chamada ainda estiver disponível.");
         } finally {
             if (conn != null) conn.disconnect();
-            NativeCallService.start(context);
+            EmbeddedCallMonitor.kick(context);
         }
     }
 }
