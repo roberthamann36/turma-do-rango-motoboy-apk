@@ -87,13 +87,26 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
             if (data.optBoolean("ok", false) && data.optBoolean("accepted", false)) {
                 int pedidoId = data.optInt("pedido_id", 0);
                 String text = pedidoId > 0
-                        ? "Pedido #" + pedidoId + " já está no seu painel. Toque para iniciar a entrega."
-                        : "A entrega já está no seu painel.";
-                DeliveryCallManager.showResultNotification(context, "✅ ENTREGA ACEITA", text);
+                        ? "Pedido #" + pedidoId + " aceito. Abra o card e toque em INICIAR COLETA."
+                        : "Entrega aceita. Toque em INICIAR COLETA para ir ao restaurante.";
+                DeliveryCallManager.showResultNotification(context, "✅ ENTREGA ACEITA • INICIAR COLETA", text);
+
                 Intent changed = new Intent(RealtimeService.ACTION_CHANGED);
                 changed.setPackage(context.getPackageName());
                 changed.putExtra("revision", "call-accepted-" + callId);
                 context.sendBroadcast(changed);
+
+                // Ao aceitar uma chamada recebida sobre outro aplicativo, traz o app do
+                // motoboy para frente para que o fluxo de coleta apareça imediatamente.
+                try {
+                    Intent open = new Intent(context, MainActivity.class);
+                    open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    if (pedidoId > 0) open.putExtra("pedido_id", pedidoId);
+                    open.putExtra("abrir_coleta", true);
+                    context.startActivity(open);
+                } catch (Exception ignored) {}
             } else if (data.optBoolean("ok", false)) {
                 DeliveryCallManager.showResultNotification(
                         context,
