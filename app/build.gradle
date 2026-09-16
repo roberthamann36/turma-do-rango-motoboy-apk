@@ -15,6 +15,10 @@ android {
     namespace 'br.com.turmadorango.motoboy'
     compileSdk 35
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId 'br.com.turmadorango.motoboy'
         minSdk 23
