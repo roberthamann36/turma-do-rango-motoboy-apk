@@ -35,7 +35,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         else registerReceiver(realtimeReceiver, f);
 
         NativeAuthSync.start(this);
-        DeliveryCallManager.start(this);
+        NativeCallService.start(this);
         BackgroundUpdateManager.start(this);
     }
 
@@ -86,7 +86,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         resumedActivity = activity;
         BackgroundUpdateManager.onActivityResumed(activity);
         NativeAuthSync.syncNow(this);
-        DeliveryCallManager.kick(this);
+        NativeCallService.start(this);
         if (activity instanceof MainActivity) {
             CommunicationGuard.install(activity);
         }
@@ -106,7 +106,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         if (activity instanceof MainActivity) {
             handler.post(() -> CommunicationGuard.install(activity));
             handler.postDelayed(() -> NativeAuthSync.syncNow(this), 1200L);
-            handler.postDelayed(() -> DeliveryCallManager.kick(this), 1500L);
+            handler.postDelayed(() -> NativeCallService.start(this), 1500L);
         }
     }
 
