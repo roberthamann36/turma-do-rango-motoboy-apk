@@ -25,12 +25,19 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Real-time monitoring of assigned courier deliveries, status changes and customer/store messages" />
+                android:value="Real-time monitoring of assigned courier deliveries, status changes, delivery offers and customer/store messages" />
         </service>
 
         <receiver
             android:name=".DeliveryCallReceiver"
             android:exported="false" />
+
+        <activity
+            android:name=".DeliveryCallActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop" />
 
         <activity
             android:name=".LauncherActivity"
