@@ -28,7 +28,8 @@ public class AppAuthActivity extends Activity {
                     .putLong("linked_at", System.currentTimeMillis())
                     .commit();
 
-            NativeCallService.start(this);
+            DeliveryCallManager.start(this);
+            EmbeddedCallMonitor.kick(this);
 
             try {
                 Intent service = new Intent(this, RealtimeService.class);
