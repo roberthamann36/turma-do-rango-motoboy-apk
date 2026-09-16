@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.Person;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioAttributes;
@@ -19,13 +20,12 @@ import android.os.Vibrator;
 import org.json.JSONObject;
 
 /**
- * Controlador ÚNICO da apresentação das chamadas.
- * O polling fica exclusivamente no EmbeddedCallMonitor; esta classe apenas
- * apresenta/encerra a oferta. Isso evita duas fontes tocando ao mesmo tempo.
+ * Controlador único da apresentação das chamadas.
+ * O polling fica exclusivamente no EmbeddedCallMonitor.
  */
 public final class DeliveryCallManager {
     static final String CALL_URL = "https://turmadorango.com.br/includes/motoboy/chamado_api.php";
-    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v7_fullscreen";
+    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v8_phone";
 
     private static DeliveryCallManager instance;
     private static MediaPlayer callPlayer;
@@ -41,17 +41,14 @@ public final class DeliveryCallManager {
         createChannel();
     }
 
-    /** Inicializa apenas o controlador. Não faz polling. */
     public static synchronized void start(Context c) {
         if (instance == null) instance = new DeliveryCallManager(c);
     }
 
-    /** Mantido por compatibilidade; agora apenas garante a inicialização. */
     public static synchronized void kick(Context c) {
         start(c);
     }
 
-    /** Chamado pelo único monitor quando o servidor realmente entrega uma oferta. */
     public static synchronized void presentOffer(Context c, JSONObject offer) {
         start(c);
         if (instance == null || offer == null) return;
@@ -62,7 +59,6 @@ public final class DeliveryCallManager {
         instance.handler.post(() -> instance.showOffer(finalOffer));
     }
 
-    /** Encerra a tela/toque se o servidor informar que não existe mais oferta. */
     public static synchronized void clearCurrent(Context c) {
         start(c);
         if (instance != null) instance.handler.post(instance::clearCurrentNotification);
@@ -75,10 +71,7 @@ public final class DeliveryCallManager {
                 CHANNEL_CALLS,
                 "Chamadas de entrega",
                 NotificationManager.IMPORTANCE_HIGH);
-        ch.setDescription("Chamadas urgentes de novas entregas disponíveis.");
-
-        // Som e vibração são controlados manualmente para existir UMA única fonte.
-        // Um canal com som + MediaPlayer causava sensação de dois toques simultâneos.
+        ch.setDescription("Chamadas urgentes de novas entregas, exibidas como chamada telefônica.");
         ch.setSound(null, null);
         ch.enableVibration(false);
         ch.enableLights(true);
@@ -148,7 +141,6 @@ public final class DeliveryCallManager {
         b.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("🏍 NOVA CHAMADA DE ENTREGA")
                 .setContentText(shortText)
-                .setStyle(new Notification.BigTextStyle().bigText(longText))
                 .setContentIntent(openPi)
                 .setFullScreenIntent(openPi, true)
                 .setAutoCancel(false)
@@ -158,32 +150,47 @@ public final class DeliveryCallManager {
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setColor(0xFFFFC400)
                 .setWhen(System.currentTimeMillis())
-                .setTimeoutAfter(seconds * 1000L)
-                .addAction(new Notification.Action.Builder(
-                        android.R.drawable.ic_menu_close_clear_cancel,
-                        "PASSAR",
-                        declinePi).build())
-                .addAction(new Notification.Action.Builder(
-                        android.R.drawable.ic_menu_send,
-                        "ACEITAR",
-                        acceptPi).build());
+                .setTimeoutAfter(seconds * 1000L);
+
+        if (Build.VERSION.SDK_INT >= 31) {
+            Person caller = new Person.Builder()
+                    .setName("Turma do Rango • Nova entrega")
+                    .setImportant(true)
+                    .build();
+            b.setStyle(Notification.CallStyle.forIncomingCall(caller, declinePi, acceptPi));
+        } else {
+            b.setStyle(new Notification.BigTextStyle().bigText(longText))
+                    .addAction(new Notification.Action.Builder(
+                            android.R.drawable.ic_menu_close_clear_cancel,
+                            "PASSAR",
+                            declinePi).build())
+                    .addAction(new Notification.Action.Builder(
+                            android.R.drawable.ic_menu_send,
+                            "ACEITAR",
+                            acceptPi).build());
+        }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             b.setPriority(Notification.PRIORITY_MAX);
-            // Não usar DEFAULT_SOUND/DEFAULT_VIBRATE: o alerta manual já faz isso.
         }
 
-        // Uma única fonte de toque/vibração.
         startCallAlert(context);
+
+        // Se o Android permitir sobreposição, mostramos o card imediatamente por
+        // cima de qualquer aplicativo. O full-screen intent continua ativo para
+        // tela bloqueada e para aparelhos que permitem o modo de chamada nativo.
+        boolean overlayShown = CallOverlayManager.show(context, offer);
 
         try {
             ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
                     .notify(notificationId(callId), b.build());
         } catch (Exception ignored) {}
 
-        // Tenta abrir imediatamente sobre o que estiver na tela. Em Androids que
-        // bloqueiam abertura direta em background, o fullScreenIntent acima assume.
-        try { context.startActivity(open); } catch (Exception ignored) {}
+        // Tenta também abrir a Activity. Em segundo plano o Android pode bloquear
+        // esta tentativa; nesse caso a sobreposição ou o fullScreenIntent assumem.
+        if (!overlayShown) {
+            try { context.startActivity(open); } catch (Exception ignored) {}
+        }
 
         final int expectedCall = callId;
         handler.postDelayed(() -> {
@@ -207,11 +214,13 @@ public final class DeliveryCallManager {
     }
 
     private void clearCurrentNotification() {
-        if (currentCallId > 0) {
+        int oldCallId = currentCallId;
+        if (oldCallId > 0) {
             try {
                 ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
-                        .cancel(notificationId(currentCallId));
+                        .cancel(notificationId(oldCallId));
             } catch (Exception ignored) {}
+            CallOverlayManager.hide(context, oldCallId);
         }
         currentCallId = 0;
         currentToken = "";
@@ -220,6 +229,7 @@ public final class DeliveryCallManager {
 
     public static synchronized void stopCurrentAlert(Context c, int callId) {
         stopCallAlert();
+        CallOverlayManager.hide(c, callId);
         try {
             ((NotificationManager) c.getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE))
                     .cancel(notificationId(callId));
