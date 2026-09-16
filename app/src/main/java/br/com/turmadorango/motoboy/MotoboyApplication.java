@@ -34,6 +34,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(realtimeReceiver, f, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(realtimeReceiver, f);
         DeliveryCallManager.start(this);
+        BackgroundUpdateManager.start(this);
     }
 
     private void refreshVisibleWebView() {
@@ -81,9 +82,11 @@ public class MotoboyApplication extends Application implements Application.Activ
 
     @Override public void onActivityResumed(Activity activity) {
         resumedActivity = activity;
+        BackgroundUpdateManager.onActivityResumed(activity);
         refreshVisibleWebView();
     }
     @Override public void onActivityPaused(Activity activity) {
+        BackgroundUpdateManager.onActivityPaused(activity);
         if (resumedActivity == activity) resumedActivity = null;
     }
     @Override public void onActivityDestroyed(Activity activity) {
