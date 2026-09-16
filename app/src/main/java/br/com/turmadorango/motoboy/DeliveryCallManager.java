@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.media.RingtoneManager;
@@ -30,14 +31,15 @@ import java.util.List;
 
 public final class DeliveryCallManager {
     static final String CALL_URL = "https://turmadorango.com.br/includes/motoboy/chamado_api.php";
-    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v5";
-    private static final long POLL_MS = 1200L;
+    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v6";
+    private static final long POLL_MS = 900L;
     private static DeliveryCallManager instance;
     private static MediaPlayer callPlayer;
     private static Vibrator callVibrator;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final SharedPreferences authPrefs;
     private boolean running;
     private boolean polling;
     private int currentCallId;
@@ -45,15 +47,22 @@ public final class DeliveryCallManager {
 
     private final Runnable pollRunnable = new Runnable() {
         @Override public void run() {
-            if (!running || polling) return;
+            if (!running) return;
+            if (polling) {
+                handler.postDelayed(this, 350L);
+                return;
+            }
             polling = true;
             new Thread(() -> {
                 long next = POLL_MS;
                 try { next = pollOnce(); }
-                catch (Exception ignored) { next = 3000L; }
+                catch (Exception ignored) {
+                    saveState("erro_rede");
+                    next = 1800L;
+                }
                 finally {
                     polling = false;
-                    if (running) handler.postDelayed(pollRunnable, Math.max(900L, next));
+                    if (running) handler.postDelayed(pollRunnable, Math.max(650L, next));
                 }
             }, "tdr-call-monitor").start();
         }
@@ -61,6 +70,7 @@ public final class DeliveryCallManager {
 
     private DeliveryCallManager(Context c) {
         context = c.getApplicationContext();
+        authPrefs = context.getSharedPreferences("tdr_app_auth", Context.MODE_PRIVATE);
         createChannel();
     }
 
@@ -68,52 +78,72 @@ public final class DeliveryCallManager {
         if (instance == null) instance = new DeliveryCallManager(c);
         instance.running = true;
         instance.handler.removeCallbacks(instance.pollRunnable);
-        instance.handler.postDelayed(instance.pollRunnable, 300L);
+        instance.handler.postDelayed(instance.pollRunnable, 250L);
     }
 
     public static synchronized void kick(Context c) {
         start(c);
         if (instance != null) {
             instance.handler.removeCallbacks(instance.pollRunnable);
-            instance.handler.postDelayed(instance.pollRunnable, 80L);
+            instance.handler.postDelayed(instance.pollRunnable, 50L);
         }
     }
 
     private String appToken() {
-        return context.getSharedPreferences("tdr_app_auth", Context.MODE_PRIVATE)
-                .getString("app_token", "").trim();
+        return authPrefs.getString("app_token", "").trim();
+    }
+
+    private void saveState(String state) {
+        authPrefs.edit()
+                .putString("call_monitor_state", state)
+                .putLong("call_monitor_checked_at", System.currentTimeMillis())
+                .apply();
     }
 
     private long pollOnce() throws Exception {
         HttpURLConnection conn = null;
         try {
             String token = appToken();
-            String endpoint = CALL_URL + "?action=current&t=" + System.currentTimeMillis();
+            if (token.isEmpty()) NativeAuthSync.syncNow(context);
+
+            String endpoint = CALL_URL + "?action=current&t=" + System.currentTimeMillis()
+                    + "&app_version=" + URLEncoder.encode(BuildConfig.VERSION_NAME, "UTF-8");
             if (!token.isEmpty()) {
                 endpoint += "&app_token=" + URLEncoder.encode(token, "UTF-8");
             }
 
             URL url = new URL(endpoint);
             conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(6500);
-            conn.setReadTimeout(6500);
+            conn.setConnectTimeout(5500);
+            conn.setReadTimeout(5500);
             conn.setUseCaches(false);
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+            conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
 
             if (!token.isEmpty()) {
                 conn.setRequestProperty("X-TDR-App-Token", token);
             } else {
-                String cookie = CookieManager.getInstance().getCookie("https://turmadorango.com.br/includes/motoboy/");
-                if (cookie != null && !cookie.trim().isEmpty()) conn.setRequestProperty("Cookie", cookie);
+                String cookie = "";
+                try {
+                    String c = CookieManager.getInstance().getCookie("https://turmadorango.com.br/includes/motoboy/");
+                    if (c != null) cookie = c.trim();
+                } catch (Exception ignored) {}
+                if (!cookie.isEmpty()) conn.setRequestProperty("Cookie", cookie);
             }
 
             int code = conn.getResponseCode();
             if (code == 401 || code == 403) {
                 clearCurrentNotification();
-                return token.isEmpty() ? 1800L : 3000L;
+                saveState(code == 401 ? "nao_autenticado" : "bloqueado");
+                if (!token.isEmpty()) NativeAuthSync.invalidateAndSync(context);
+                else NativeAuthSync.syncNow(context);
+                return 1200L;
             }
-            if (code < 200 || code >= 300) return 3000L;
+            if (code < 200 || code >= 300) {
+                saveState("http_" + code);
+                return 1800L;
+            }
 
             StringBuilder body = new StringBuilder();
             try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
@@ -122,8 +152,27 @@ public final class DeliveryCallManager {
             }
 
             JSONObject data = new JSONObject(body.toString());
+            if (!data.optBoolean("ok", false)) {
+                saveState("resposta_invalida");
+                return 1400L;
+            }
+
+            boolean nativeConnected = data.optBoolean("native_connected", !token.isEmpty());
+            if (!nativeConnected && !token.isEmpty()) {
+                NativeAuthSync.invalidateAndSync(context);
+                saveState("token_nao_reconhecido");
+                return 1200L;
+            }
+
+            authPrefs.edit()
+                    .putString("call_monitor_state", "conectado")
+                    .putLong("call_monitor_ok_at", System.currentTimeMillis())
+                    .putLong("call_monitor_checked_at", System.currentTimeMillis())
+                    .putInt("call_monitor_motoboy_id", data.optInt("motoboy_id", 0))
+                    .apply();
+
             JSONObject offer = data.optJSONObject("offer");
-            if (!data.optBoolean("ok", false) || offer == null || offer.optInt("id", 0) <= 0) {
+            if (offer == null || offer.optInt("id", 0) <= 0) {
                 clearCurrentNotification();
                 return POLL_MS;
             }
@@ -166,6 +215,11 @@ public final class DeliveryCallManager {
         clearCurrentNotification();
         currentCallId = callId;
         currentToken = offerToken;
+
+        authPrefs.edit()
+                .putInt("last_offer_id", callId)
+                .putLong("last_offer_at", System.currentTimeMillis())
+                .apply();
 
         String street = offer.optString("rua", "Rua não informada");
         String district = offer.optString("bairro", "Bairro não informado");
@@ -217,7 +271,6 @@ public final class DeliveryCallManager {
             b.setDefaults(Notification.DEFAULT_ALL);
         }
 
-        // O toque/vibração não depende da permissão de notificação do Android.
         startCallAlert(context);
         try {
             ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
