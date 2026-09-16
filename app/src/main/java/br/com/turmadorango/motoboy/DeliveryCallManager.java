@@ -1,13 +1,11 @@
 package br.com.turmadorango.motoboy;
 
-import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.media.RingtoneManager;
@@ -17,192 +15,76 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
-import android.webkit.CookieManager;
 
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-
+/**
+ * Controlador ÚNICO da apresentação das chamadas.
+ * O polling fica exclusivamente no EmbeddedCallMonitor; esta classe apenas
+ * apresenta/encerra a oferta. Isso evita duas fontes tocando ao mesmo tempo.
+ */
 public final class DeliveryCallManager {
     static final String CALL_URL = "https://turmadorango.com.br/includes/motoboy/chamado_api.php";
-    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v6";
-    private static final long POLL_MS = 900L;
+    static final String CHANNEL_CALLS = "tdr_motoboy_calls_v7_fullscreen";
+
     private static DeliveryCallManager instance;
     private static MediaPlayer callPlayer;
     private static Vibrator callVibrator;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final SharedPreferences authPrefs;
-    private boolean running;
-    private boolean polling;
     private int currentCallId;
     private String currentToken = "";
 
-    private final Runnable pollRunnable = new Runnable() {
-        @Override public void run() {
-            if (!running) return;
-            if (polling) {
-                handler.postDelayed(this, 350L);
-                return;
-            }
-            polling = true;
-            new Thread(() -> {
-                long next = POLL_MS;
-                try { next = pollOnce(); }
-                catch (Exception ignored) {
-                    saveState("erro_rede");
-                    next = 1800L;
-                }
-                finally {
-                    polling = false;
-                    if (running) handler.postDelayed(pollRunnable, Math.max(650L, next));
-                }
-            }, "tdr-call-monitor").start();
-        }
-    };
-
     private DeliveryCallManager(Context c) {
         context = c.getApplicationContext();
-        authPrefs = context.getSharedPreferences("tdr_app_auth", Context.MODE_PRIVATE);
         createChannel();
     }
 
+    /** Inicializa apenas o controlador. Não faz polling. */
     public static synchronized void start(Context c) {
         if (instance == null) instance = new DeliveryCallManager(c);
-        instance.running = true;
-        instance.handler.removeCallbacks(instance.pollRunnable);
-        instance.handler.postDelayed(instance.pollRunnable, 250L);
     }
 
+    /** Mantido por compatibilidade; agora apenas garante a inicialização. */
     public static synchronized void kick(Context c) {
         start(c);
-        if (instance != null) {
-            instance.handler.removeCallbacks(instance.pollRunnable);
-            instance.handler.postDelayed(instance.pollRunnable, 50L);
-        }
     }
 
-    private String appToken() {
-        return authPrefs.getString("app_token", "").trim();
+    /** Chamado pelo único monitor quando o servidor realmente entrega uma oferta. */
+    public static synchronized void presentOffer(Context c, JSONObject offer) {
+        start(c);
+        if (instance == null || offer == null) return;
+        JSONObject copy;
+        try { copy = new JSONObject(offer.toString()); }
+        catch (Exception e) { copy = offer; }
+        final JSONObject finalOffer = copy;
+        instance.handler.post(() -> instance.showOffer(finalOffer));
     }
 
-    private void saveState(String state) {
-        authPrefs.edit()
-                .putString("call_monitor_state", state)
-                .putLong("call_monitor_checked_at", System.currentTimeMillis())
-                .apply();
-    }
-
-    private long pollOnce() throws Exception {
-        HttpURLConnection conn = null;
-        try {
-            String token = appToken();
-            if (token.isEmpty()) NativeAuthSync.syncNow(context);
-
-            String endpoint = CALL_URL + "?action=current&t=" + System.currentTimeMillis()
-                    + "&app_version=" + URLEncoder.encode(BuildConfig.VERSION_NAME, "UTF-8");
-            if (!token.isEmpty()) {
-                endpoint += "&app_token=" + URLEncoder.encode(token, "UTF-8");
-            }
-
-            URL url = new URL(endpoint);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(5500);
-            conn.setReadTimeout(5500);
-            conn.setUseCaches(false);
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
-            conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
-
-            if (!token.isEmpty()) {
-                conn.setRequestProperty("X-TDR-App-Token", token);
-            } else {
-                String cookie = "";
-                try {
-                    String c = CookieManager.getInstance().getCookie("https://turmadorango.com.br/includes/motoboy/");
-                    if (c != null) cookie = c.trim();
-                } catch (Exception ignored) {}
-                if (!cookie.isEmpty()) conn.setRequestProperty("Cookie", cookie);
-            }
-
-            int code = conn.getResponseCode();
-            if (code == 401 || code == 403) {
-                clearCurrentNotification();
-                saveState(code == 401 ? "nao_autenticado" : "bloqueado");
-                if (!token.isEmpty()) NativeAuthSync.invalidateAndSync(context);
-                else NativeAuthSync.syncNow(context);
-                return 1200L;
-            }
-            if (code < 200 || code >= 300) {
-                saveState("http_" + code);
-                return 1800L;
-            }
-
-            StringBuilder body = new StringBuilder();
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) body.append(line);
-            }
-
-            JSONObject data = new JSONObject(body.toString());
-            if (!data.optBoolean("ok", false)) {
-                saveState("resposta_invalida");
-                return 1400L;
-            }
-
-            boolean nativeConnected = data.optBoolean("native_connected", !token.isEmpty());
-            if (!nativeConnected && !token.isEmpty()) {
-                NativeAuthSync.invalidateAndSync(context);
-                saveState("token_nao_reconhecido");
-                return 1200L;
-            }
-
-            authPrefs.edit()
-                    .putString("call_monitor_state", "conectado")
-                    .putLong("call_monitor_ok_at", System.currentTimeMillis())
-                    .putLong("call_monitor_checked_at", System.currentTimeMillis())
-                    .putInt("call_monitor_motoboy_id", data.optInt("motoboy_id", 0))
-                    .apply();
-
-            JSONObject offer = data.optJSONObject("offer");
-            if (offer == null || offer.optInt("id", 0) <= 0) {
-                clearCurrentNotification();
-                return POLL_MS;
-            }
-
-            showOffer(offer);
-            return POLL_MS;
-        } finally {
-            if (conn != null) conn.disconnect();
-        }
+    /** Encerra a tela/toque se o servidor informar que não existe mais oferta. */
+    public static synchronized void clearCurrent(Context c) {
+        start(c);
+        if (instance != null) instance.handler.post(instance::clearCurrentNotification);
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        NotificationChannel ch = new NotificationChannel(CHANNEL_CALLS, "Chamadas de entrega", NotificationManager.IMPORTANCE_HIGH);
+        NotificationChannel ch = new NotificationChannel(
+                CHANNEL_CALLS,
+                "Chamadas de entrega",
+                NotificationManager.IMPORTANCE_HIGH);
         ch.setDescription("Chamadas urgentes de novas entregas disponíveis.");
-        ch.enableVibration(true);
-        ch.setVibrationPattern(new long[]{0, 500, 250, 500, 250, 900});
+
+        // Som e vibração são controlados manualmente para existir UMA única fonte.
+        // Um canal com som + MediaPlayer causava sensação de dois toques simultâneos.
+        ch.setSound(null, null);
+        ch.enableVibration(false);
         ch.enableLights(true);
         ch.setLightColor(0xFFFFC400);
         ch.setShowBadge(true);
         ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        try {
-            Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            AudioAttributes attrs = new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build();
-            ch.setSound(sound, attrs);
-        } catch (Exception ignored) {}
         nm.createNotificationChannel(ch);
     }
 
@@ -216,7 +98,8 @@ public final class DeliveryCallManager {
         currentCallId = callId;
         currentToken = offerToken;
 
-        authPrefs.edit()
+        context.getSharedPreferences("tdr_app_auth", Context.MODE_PRIVATE)
+                .edit()
                 .putInt("last_offer_id", callId)
                 .putLong("last_offer_at", System.currentTimeMillis())
                 .apply();
@@ -227,7 +110,10 @@ public final class DeliveryCallManager {
         int pedidoId = offer.optInt("pedido_id", 0);
 
         Intent open = buildCallScreenIntent(offer);
-        PendingIntent openPi = PendingIntent.getActivity(context, 41000 + (callId % 8000), open,
+        PendingIntent openPi = PendingIntent.getActivity(
+                context,
+                41000 + (callId % 8000),
+                open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         Intent accept = new Intent(context, DeliveryCallReceiver.class);
@@ -235,7 +121,10 @@ public final class DeliveryCallManager {
         accept.putExtra("call_id", callId);
         accept.putExtra("pedido_id", pedidoId);
         accept.putExtra("token", offerToken);
-        PendingIntent acceptPi = PendingIntent.getBroadcast(context, 51000 + (callId % 8000), accept,
+        PendingIntent acceptPi = PendingIntent.getBroadcast(
+                context,
+                51000 + (callId % 8000),
+                accept,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         Intent decline = new Intent(context, DeliveryCallReceiver.class);
@@ -243,53 +132,71 @@ public final class DeliveryCallManager {
         decline.putExtra("call_id", callId);
         decline.putExtra("pedido_id", pedidoId);
         decline.putExtra("token", offerToken);
-        PendingIntent declinePi = PendingIntent.getBroadcast(context, 61000 + (callId % 8000), decline,
+        PendingIntent declinePi = PendingIntent.getBroadcast(
+                context,
+                61000 + (callId % 8000),
+                decline,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         String shortText = street + " • " + district;
         String longText = "📍 " + street + "\n🏘 " + district + "\n\n" + seconds + " segundos para aceitar.";
+
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(context, CHANNEL_CALLS)
                 : new Notification.Builder(context);
+
         b.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("🏍 NOVA CHAMADA DE ENTREGA")
                 .setContentText(shortText)
                 .setStyle(new Notification.BigTextStyle().bigText(longText))
                 .setContentIntent(openPi)
+                .setFullScreenIntent(openPi, true)
                 .setAutoCancel(false)
                 .setOngoing(true)
-                .setOnlyAlertOnce(false)
-                .setCategory(Notification.CATEGORY_EVENT)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_CALL)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setColor(0xFFFFC400)
                 .setWhen(System.currentTimeMillis())
                 .setTimeoutAfter(seconds * 1000L)
-                .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "PASSAR", declinePi).build())
-                .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_send, "ACEITAR", acceptPi).build());
+                .addAction(new Notification.Action.Builder(
+                        android.R.drawable.ic_menu_close_clear_cancel,
+                        "PASSAR",
+                        declinePi).build())
+                .addAction(new Notification.Action.Builder(
+                        android.R.drawable.ic_menu_send,
+                        "ACEITAR",
+                        acceptPi).build());
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             b.setPriority(Notification.PRIORITY_MAX);
-            b.setDefaults(Notification.DEFAULT_ALL);
+            // Não usar DEFAULT_SOUND/DEFAULT_VIBRATE: o alerta manual já faz isso.
         }
 
+        // Uma única fonte de toque/vibração.
         startCallAlert(context);
+
         try {
             ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
                     .notify(notificationId(callId), b.build());
         } catch (Exception ignored) {}
 
+        // Tenta abrir imediatamente sobre o que estiver na tela. Em Androids que
+        // bloqueiam abertura direta em background, o fullScreenIntent acima assume.
+        try { context.startActivity(open); } catch (Exception ignored) {}
+
         final int expectedCall = callId;
         handler.postDelayed(() -> {
             if (currentCallId == expectedCall) clearCurrentNotification();
         }, seconds * 1000L + 500L);
-
-        if (isAppForeground()) {
-            try { context.startActivity(open); } catch (Exception ignored) {}
-        }
     }
 
     private Intent buildCallScreenIntent(JSONObject offer) {
         Intent i = new Intent(context, DeliveryCallActivity.class);
-        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
         i.putExtra("call_id", offer.optInt("id", 0));
         i.putExtra("pedido_id", offer.optInt("pedido_id", 0));
         i.putExtra("token", offer.optString("token", ""));
@@ -299,23 +206,11 @@ public final class DeliveryCallManager {
         return i;
     }
 
-    private boolean isAppForeground() {
-        try {
-            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-            List<ActivityManager.RunningAppProcessInfo> list = am.getRunningAppProcesses();
-            if (list == null) return false;
-            for (ActivityManager.RunningAppProcessInfo p : list) {
-                if (context.getPackageName().equals(p.processName)
-                        && p.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) return true;
-            }
-        } catch (Exception ignored) {}
-        return false;
-    }
-
     private void clearCurrentNotification() {
         if (currentCallId > 0) {
             try {
-                ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(notificationId(currentCallId));
+                ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
+                        .cancel(notificationId(currentCallId));
             } catch (Exception ignored) {}
         }
         currentCallId = 0;
@@ -326,7 +221,7 @@ public final class DeliveryCallManager {
     public static synchronized void stopCurrentAlert(Context c, int callId) {
         stopCallAlert();
         try {
-            ((NotificationManager)c.getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE))
+            ((NotificationManager) c.getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE))
                     .cancel(notificationId(callId));
         } catch (Exception ignored) {}
         if (instance != null && (callId <= 0 || instance.currentCallId == callId)) {
@@ -338,6 +233,7 @@ public final class DeliveryCallManager {
     private static synchronized void startCallAlert(Context c) {
         stopCallAlert();
         Context app = c.getApplicationContext();
+
         try {
             Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
             if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
@@ -353,6 +249,7 @@ public final class DeliveryCallManager {
             mp.start();
             callPlayer = mp;
         } catch (Exception ignored) {}
+
         try {
             callVibrator = (Vibrator) app.getSystemService(Context.VIBRATOR_SERVICE);
             long[] pattern = new long[]{0, 650, 250, 650, 250, 1000};
@@ -372,7 +269,10 @@ public final class DeliveryCallManager {
             }
         } catch (Exception ignored) {}
         callPlayer = null;
-        try { if (callVibrator != null) callVibrator.cancel(); } catch (Exception ignored) {}
+
+        try {
+            if (callVibrator != null) callVibrator.cancel();
+        } catch (Exception ignored) {}
         callVibrator = null;
     }
 
@@ -381,10 +281,17 @@ public final class DeliveryCallManager {
     }
 
     static void showResultNotification(Context c, String title, String text) {
-        NotificationManager nm = (NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE);
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         Intent open = new Intent(c, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-        PendingIntent pi = PendingIntent.getActivity(c, 69001, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent pi = PendingIntent.getActivity(
+                c,
+                69001,
+                open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(c, CHANNEL_CALLS)
                 : new Notification.Builder(c);
@@ -398,8 +305,9 @@ public final class DeliveryCallManager {
                 .setWhen(System.currentTimeMillis());
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             b.setPriority(Notification.PRIORITY_HIGH);
-            b.setDefaults(Notification.DEFAULT_ALL);
         }
         try { nm.notify(69001, b.build()); } catch (Exception ignored) {}
     }
+
+    private DeliveryCallManager() { throw new AssertionError(); }
 }
