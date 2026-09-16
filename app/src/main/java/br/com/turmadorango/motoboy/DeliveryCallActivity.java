@@ -8,6 +8,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,6 +31,7 @@ public class DeliveryCallActivity extends Activity {
     private ProgressBar timerBar;
     private CountDownTimer timer;
     private boolean answered = false;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -254,7 +257,26 @@ public class DeliveryCallActivity extends Activity {
         i.putExtra("pedido_id", pedidoId);
         i.putExtra("token", token);
         sendBroadcast(i);
-        finish();
+
+        if (accept) {
+            // Mantém a tela de chamada por alguns milissegundos para a API confirmar
+            // a posse do pedido e então traz o painel do motoboy para frente. O
+            // realtime já sinaliza o WebView para recarregar com a nova etapa COLETA.
+            handler.postDelayed(() -> {
+                try {
+                    Intent main = new Intent(DeliveryCallActivity.this, MainActivity.class);
+                    main.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                    main.putExtra("pedido_id", pedidoId);
+                    main.putExtra("abrir_coleta", true);
+                    startActivity(main);
+                } catch (Exception ignored) {}
+                finish();
+            }, 850L);
+        } else {
+            finish();
+        }
     }
 
     @Override public void onBackPressed() {
@@ -282,6 +304,7 @@ public class DeliveryCallActivity extends Activity {
 
     @Override protected void onDestroy() {
         if (timer != null) timer.cancel();
+        handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
 }
