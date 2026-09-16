@@ -30,15 +30,14 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
         final String action = ACTION_ACCEPT.equals(a) ? "accept" : "decline";
 
         DeliveryCallManager.stopCurrentAlert(app, callId);
-
         new Thread(() -> {
             try { respond(app, callId, token == null ? "" : token, action); }
             finally { pending.finish(); }
         }, "tdr-call-action").start();
     }
 
-    private void respond(Context context, int callId, String token, String action) {
-        if (callId <= 0 || token.isEmpty()) return;
+    private void respond(Context context, int callId, String offerToken, String action) {
+        if (callId <= 0 || offerToken.isEmpty()) return;
         HttpURLConnection conn = null;
         try {
             URL url = new URL(DeliveryCallManager.CALL_URL + "?action=" + action);
@@ -51,12 +50,21 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
             conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
-            String cookie = CookieManager.getInstance().getCookie("https://turmadorango.com.br/");
-            if (cookie != null && !cookie.trim().isEmpty()) conn.setRequestProperty("Cookie", cookie);
+
+            String appToken = context.getSharedPreferences("tdr_app_auth", Context.MODE_PRIVATE)
+                    .getString("app_token", "").trim();
+            if (!appToken.isEmpty()) {
+                conn.setRequestProperty("X-TDR-App-Token", appToken);
+            } else {
+                String cookie = CookieManager.getInstance().getCookie("https://turmadorango.com.br/includes/motoboy/");
+                if (cookie != null && !cookie.trim().isEmpty()) conn.setRequestProperty("Cookie", cookie);
+            }
 
             String body = "call_id=" + URLEncoder.encode(String.valueOf(callId), "UTF-8")
-                    + "&token=" + URLEncoder.encode(token, "UTF-8");
-            try (OutputStream os = conn.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
+                    + "&token=" + URLEncoder.encode(offerToken, "UTF-8");
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.getBytes(StandardCharsets.UTF_8));
+            }
 
             int code = conn.getResponseCode();
             BufferedReader r = new BufferedReader(new InputStreamReader(
@@ -67,7 +75,8 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
             r.close();
 
             JSONObject data = new JSONObject(result.toString());
-            ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(DeliveryCallManager.notificationId(callId));
+            ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE))
+                    .cancel(DeliveryCallManager.notificationId(callId));
 
             if (data.optBoolean("ok", false) && data.optBoolean("accepted", false)) {
                 int pedidoId = data.optInt("pedido_id", 0);
@@ -79,11 +88,15 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
                 changed.setPackage(context.getPackageName());
                 changed.putExtra("revision", "call-accepted-" + callId);
                 context.sendBroadcast(changed);
-            } else if (!data.optBoolean("ok", false)) {
-                DeliveryCallManager.showResultNotification(context, "Chamada encerrada", data.optString("message", "Esta chamada já não está disponível."));
+            } else if (data.optBoolean("ok", false)) {
+                DeliveryCallManager.showResultNotification(context, "Chamada passada", "A entrega foi enviada para o próximo motoboy online.");
+            } else {
+                DeliveryCallManager.showResultNotification(context, "Chamada encerrada",
+                        data.optString("message", "Esta chamada já não está disponível."));
             }
         } catch (Exception e) {
-            DeliveryCallManager.showResultNotification(context, "Falha ao responder", "Confira a internet e tente novamente se a chamada ainda estiver disponível.");
+            DeliveryCallManager.showResultNotification(context, "Falha ao responder",
+                    "Confira a internet e tente novamente se a chamada ainda estiver disponível.");
         } finally {
             if (conn != null) conn.disconnect();
             DeliveryCallManager.kick(context);
