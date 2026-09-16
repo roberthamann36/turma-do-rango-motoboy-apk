@@ -28,6 +28,10 @@
                 android:value="Real-time monitoring of assigned courier deliveries, status changes and customer/store messages" />
         </service>
 
+        <receiver
+            android:name=".DeliveryCallReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".LauncherActivity"
             android:exported="true">
