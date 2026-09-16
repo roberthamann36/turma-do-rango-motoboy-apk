@@ -35,13 +35,8 @@ public class MotoboyApplication extends Application implements Application.Activ
         else registerReceiver(realtimeReceiver, f);
 
         NativeAuthSync.start(this);
-
-        // As chamadas agora rodam no mesmo processo mantido vivo pelo RealtimeService.
-        // Não dependemos mais de um segundo foreground service, que alguns Androids
-        // estavam encerrando silenciosamente.
         DeliveryCallManager.start(this);
         EmbeddedCallMonitor.start(this);
-
         BackgroundUpdateManager.start(this);
     }
 
@@ -96,6 +91,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         EmbeddedCallMonitor.kick(this);
         if (activity instanceof MainActivity) {
             CommunicationGuard.install(activity);
+            handler.postDelayed(() -> CallPermissionManager.ensure(activity), 700L);
         }
         refreshVisibleWebView();
     }
@@ -115,6 +111,7 @@ public class MotoboyApplication extends Application implements Application.Activ
             handler.postDelayed(() -> NativeAuthSync.syncNow(this), 900L);
             handler.postDelayed(() -> DeliveryCallManager.kick(this), 1100L);
             handler.postDelayed(() -> EmbeddedCallMonitor.kick(this), 1200L);
+            handler.postDelayed(() -> CallPermissionManager.ensure(activity), 1600L);
         }
     }
 
