@@ -262,10 +262,15 @@ public final class CommunicationGuard {
             Activity activity = activityRef.get();
             if (activity == null || activity.isFinishing()) return;
             if (renderCrashed) {
-                // Se o processo do WebView caiu, recria a Activity sem exigir ação do usuário.
+                // Nunca traz o aplicativo para frente só porque o processo do
+                // WebView caiu em segundo plano. Aguarda o motoboy voltar ao app.
+                if (!activity.hasWindowFocus()) {
+                    scheduleRetry(true);
+                    return;
+                }
                 try {
                     Intent restart = new Intent(activity, MainActivity.class);
-                    restart.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    restart.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
                     activity.startActivity(restart);
                     activity.finish();
                 } catch (Exception ignored) {}
@@ -304,6 +309,12 @@ public final class CommunicationGuard {
         }
         Activity activity = activityRef.get();
         if (activity == null || activity.isFinishing()) return true;
+
+        // Links externos só podem abrir outro app quando esta Activity estiver
+        // realmente na frente. Isso impede intents periódicos de roubar o foco
+        // do WhatsApp, Maps ou qualquer outro aplicativo em segundo plano.
+        if (!activity.hasWindowFocus()) return true;
+
         try {
             if (url.startsWith("intent://")) {
                 Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
