@@ -21,6 +21,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
@@ -74,16 +75,11 @@ public class RealtimeService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-
         prefs.edit().putBoolean("service_enabled", true).apply();
         startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification());
         handler.removeCallbacks(pollRunnable);
         handler.postDelayed(pollRunnable, 500L);
         return START_STICKY;
-    }
-
-    @Override public void onTaskRemoved(Intent rootIntent) {
-        super.onTaskRemoved(rootIntent);
     }
 
     @Override public void onDestroy() {
@@ -114,9 +110,9 @@ public class RealtimeService extends Service {
 
         NotificationChannel alerts = new NotificationChannel(
                 CHANNEL_ALERTS,
-                "Entregas e alterações",
+                "Entregas e notificações",
                 NotificationManager.IMPORTANCE_HIGH);
-        alerts.setDescription("Avisos de novas entregas, mudanças de status e mensagens.");
+        alerts.setDescription("Avisos de entregas, pagamentos e abertura/fechamento do restaurante.");
         alerts.enableVibration(true);
         alerts.setShowBadge(true);
         nm.createNotificationChannel(alerts);
@@ -141,7 +137,7 @@ public class RealtimeService extends Service {
 
         b.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("Turma do Rango • Motoboy conectado")
-                .setContentText("Monitorando entregas e alterações em tempo real")
+                .setContentText("Monitorando entregas e notificações em tempo real")
                 .setContentIntent(openPi)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -150,7 +146,6 @@ public class RealtimeService extends Service {
                         android.R.drawable.ic_menu_close_clear_cancel,
                         "Encerrar monitoramento",
                         stopPi).build());
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) b.setPriority(Notification.PRIORITY_LOW);
         return b.build();
     }
@@ -161,14 +156,16 @@ public class RealtimeService extends Service {
             Intent open=new Intent(this,MainActivity.class);
             open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
             PendingIntent pi=PendingIntent.getActivity(this,6001,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-            Notification.Builder b=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O?new Notification.Builder(this,CHANNEL_SERVICE):new Notification.Builder(this);
+            Notification.Builder b=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O
+                    ? new Notification.Builder(this,CHANNEL_SERVICE)
+                    : new Notification.Builder(this);
             b.setSmallIcon(R.drawable.ic_launcher)
-             .setContentTitle("Turma do Rango • Motoboy conectado")
-             .setContentText(text)
-             .setContentIntent(pi)
-             .setOngoing(true)
-             .setOnlyAlertOnce(true)
-             .setCategory(Notification.CATEGORY_SERVICE);
+                    .setContentTitle("Turma do Rango • Motoboy conectado")
+                    .setContentText(text)
+                    .setContentIntent(pi)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .setCategory(Notification.CATEGORY_SERVICE);
             if(Build.VERSION.SDK_INT<Build.VERSION_CODES.O)b.setPriority(Notification.PRIORITY_LOW);
             nm.notify(SERVICE_NOTIFICATION_ID,b.build());
         } catch(Exception ignored) {}
@@ -177,13 +174,22 @@ public class RealtimeService extends Service {
     private void pollServer() {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(REALTIME_URL + "?t=" + System.currentTimeMillis());
+            String appToken = getSharedPreferences("tdr_app_auth", MODE_PRIVATE)
+                    .getString("app_token", "").trim();
+            String endpoint = REALTIME_URL + "?t=" + System.currentTimeMillis();
+            if (!appToken.isEmpty()) {
+                endpoint += "&app_token=" + URLEncoder.encode(appToken, "UTF-8");
+            }
+
+            URL url = new URL(endpoint);
             conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(7000);
             conn.setReadTimeout(7000);
             conn.setUseCaches(false);
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+            conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
+            if (!appToken.isEmpty()) conn.setRequestProperty("X-TDR-App-Token", appToken);
 
             String cookie = CookieManager.getInstance().getCookie("https://turmadorango.com.br/");
             if (cookie != null && !cookie.trim().isEmpty()) conn.setRequestProperty("Cookie", cookie);
@@ -215,7 +221,11 @@ public class RealtimeService extends Service {
             }
 
             nextPollMs = Math.max(2500L, data.optLong("poll_ms", DEFAULT_POLL_MS));
-            updateServiceNotification("Monitorando entregas e alterações em tempo real");
+            boolean storeOpen = data.optBoolean("store_open", false);
+            updateServiceNotification(storeOpen
+                    ? "Chamadas ativas • restaurante aberto"
+                    : "Chamadas ativas • restaurante fechado");
+
             int motoboyId = data.optInt("motoboy_id", 0);
             int previousMotoboy = prefs.getInt("motoboy_id", 0);
             if (previousMotoboy > 0 && motoboyId > 0 && previousMotoboy != motoboyId) {
@@ -224,6 +234,8 @@ public class RealtimeService extends Service {
             } else if (motoboyId > 0 && previousMotoboy == 0) {
                 prefs.edit().putInt("motoboy_id", motoboyId).apply();
             }
+
+            processAppNotifications(data.optJSONArray("app_notifications"));
 
             JSONArray orders = data.optJSONArray("orders");
             if (orders == null) orders = new JSONArray();
@@ -272,12 +284,7 @@ public class RealtimeService extends Service {
             editor.putString("last_revision", data.optString("revision", ""));
             editor.apply();
 
-            if (anyChanged) {
-                Intent changed = new Intent(ACTION_CHANGED);
-                changed.setPackage(getPackageName());
-                changed.putExtra("revision", data.optString("revision", ""));
-                sendBroadcast(changed);
-            }
+            if (anyChanged) sendRefreshBroadcast(data.optString("revision", ""));
         } catch (Exception ignored) {
             nextPollMs = 8000L;
         } finally {
@@ -285,10 +292,73 @@ public class RealtimeService extends Service {
         }
     }
 
+    private void processAppNotifications(JSONArray items) {
+        if (items == null) return;
+        int maxId = 0;
+        for (int i=0;i<items.length();i++) {
+            JSONObject n=items.optJSONObject(i);
+            if(n!=null) maxId=Math.max(maxId,n.optInt("id",0));
+        }
+        if (maxId <= 0) return;
+
+        boolean ready=prefs.getBoolean("app_notif_baseline_ready",false);
+        int last=prefs.getInt("last_app_notification_id",0);
+        if(!ready){
+            prefs.edit().putBoolean("app_notif_baseline_ready",true).putInt("last_app_notification_id",maxId).apply();
+            return;
+        }
+
+        for(int i=items.length()-1;i>=0;i--){
+            JSONObject n=items.optJSONObject(i);
+            if(n==null) continue;
+            int id=n.optInt("id",0);
+            if(id>last) notifyAppNotification(n);
+        }
+        if(maxId>last) prefs.edit().putInt("last_app_notification_id",maxId).apply();
+    }
+
+    private void notifyAppNotification(JSONObject n) {
+        int id=n.optInt("id",0);
+        String title=n.optString("titulo","🔔 Nova notificação");
+        String text=n.optString("mensagem","");
+        Intent open=new Intent(this,MainActivity.class);
+        open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi=PendingIntent.getActivity(this,8100+(Math.abs(id)%1000),open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        Notification.Builder b=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O
+                ? new Notification.Builder(this,CHANNEL_ALERTS)
+                : new Notification.Builder(this);
+        b.setSmallIcon(R.drawable.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .setOnlyAlertOnce(false)
+                .setWhen(System.currentTimeMillis());
+        if(Build.VERSION.SDK_INT<Build.VERSION_CODES.O){b.setPriority(Notification.PRIORITY_HIGH);b.setDefaults(Notification.DEFAULT_ALL);}
+        try { ((NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE)).notify(18000+(Math.abs(id)%10000),b.build()); } catch(Exception ignored) {}
+    }
+
+    private void sendRefreshBroadcast(String revision) {
+        Intent changed = new Intent(ACTION_CHANGED);
+        changed.setPackage(getPackageName());
+        changed.putExtra("revision", revision);
+        sendBroadcast(changed);
+    }
+
     private String detectChange(JSONObject old, JSONObject now) {
         int oldChat = old.optInt("chat_last_id", 0);
         int newChat = now.optInt("chat_last_id", 0);
         if (newChat > oldChat && newChat > 0) return "chat";
+
+        boolean oldPaid=old.optBoolean("pago",false);
+        boolean newPaid=now.optBoolean("pago",false);
+        String oldPayment=old.optString("forma_pagamento","");
+        String newPayment=now.optString("forma_pagamento","");
+        double oldTotal=old.optDouble("total",0);
+        double newTotal=now.optDouble("total",0);
+        if(oldPaid!=newPaid || !oldPayment.equals(newPayment) || Math.abs(oldTotal-newTotal)>0.009) return "payment";
 
         String oldDecision = old.optString("problema_decisao", "");
         String newDecision = now.optString("problema_decisao", "");
@@ -305,7 +375,6 @@ public class RealtimeService extends Service {
         String oldStatus = old.optString("status", "");
         String newStatus = now.optString("status", "");
         if (!oldStatus.equals(newStatus)) return "status";
-
         return "update";
     }
 
@@ -321,6 +390,15 @@ public class RealtimeService extends Service {
             case "new":
                 title = "🏍 Nova entrega para você";
                 text = "Pedido " + code + " • " + client;
+                break;
+            case "payment":
+                if(order.optBoolean("pago",false)){
+                    title="✅ Pedido pago";
+                    text="Pedido "+code+" • Não receber valor do cliente.";
+                }else{
+                    title="💳 Pagamento atualizado";
+                    text="Pedido "+code+" • "+order.optString("forma_pagamento","Pagamento")+" • "+order.optString("total_brl","");
+                }
                 break;
             case "chat":
                 String dir = order.optString("chat_direction", "cliente");
@@ -355,15 +433,12 @@ public class RealtimeService extends Service {
         open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         open.putExtra("pedido_id", id);
         PendingIntent pi = PendingIntent.getActivity(
-                this,
-                7000 + (id % 1000),
-                open,
+                this, 7000 + (id % 1000), open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ALERTS)
                 : new Notification.Builder(this);
-
         b.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle(title)
                 .setContentText(text)
@@ -373,14 +448,11 @@ public class RealtimeService extends Service {
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .setOnlyAlertOnce(false)
                 .setWhen(System.currentTimeMillis());
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             b.setPriority(Notification.PRIORITY_HIGH);
             b.setDefaults(Notification.DEFAULT_ALL);
         }
-
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        nm.notify(10000 + (id % 100000), b.build());
+        try { ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(10000 + (id % 100000), b.build()); } catch(Exception ignored) {}
     }
 
     private String shorten(String s, int max) {
