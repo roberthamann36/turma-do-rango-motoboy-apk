@@ -38,6 +38,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         DeliveryCallManager.start(this);
         EmbeddedCallMonitor.start(this);
         BackgroundUpdateManager.start(this);
+        OnlineUpdateManager.start(this);
     }
 
     private void refreshVisibleWebView() {
@@ -54,11 +55,12 @@ public class MotoboyApplication extends Application implements Application.Activ
             return;
         }
 
-        String js = "(function(){return !!document.querySelector('.modal.show, textarea:focus, input:focus, select:focus');})()";
+        String js = "(function(){return !!document.querySelector('.modal.show, textarea:focus, input:focus, select:focus, button:active');})()";
         web.evaluateJavascript(js, value -> {
             boolean busy = "true".equalsIgnoreCase(String.valueOf(value).replace("\"", ""));
             if (!busy && pendingRefresh && resumedActivity != null) {
                 pendingRefresh = false;
+                web.clearCache(false);
                 web.reload();
             } else if (pendingRefresh) {
                 retryLater();
@@ -67,7 +69,6 @@ public class MotoboyApplication extends Application implements Application.Activ
     }
 
     private void retryLater() {
-        handler.removeCallbacksAndMessages(null);
         handler.postDelayed(this::refreshVisibleWebView, 3500L);
     }
 
@@ -89,6 +90,7 @@ public class MotoboyApplication extends Application implements Application.Activ
         NativeAuthSync.syncNow(this);
         DeliveryCallManager.kick(this);
         EmbeddedCallMonitor.kick(this);
+        OnlineUpdateManager.check(this);
         if (activity instanceof MainActivity) {
             CommunicationGuard.install(activity);
             handler.postDelayed(() -> CallPermissionManager.ensure(activity), 700L);
@@ -112,6 +114,7 @@ public class MotoboyApplication extends Application implements Application.Activ
             handler.postDelayed(() -> DeliveryCallManager.kick(this), 1100L);
             handler.postDelayed(() -> EmbeddedCallMonitor.kick(this), 1200L);
             handler.postDelayed(() -> CallPermissionManager.ensure(activity), 1600L);
+            handler.postDelayed(() -> OnlineUpdateManager.check(this), 1800L);
         }
     }
 
