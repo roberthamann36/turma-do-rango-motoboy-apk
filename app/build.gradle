@@ -10,8 +10,6 @@ if (versionFile.exists()) {
 def tdrVersionCode = (project.findProperty('versionCodeOverride') ?: versionProps.getProperty('VERSION_CODE', '2')) as Integer
 def tdrVersionName = (project.findProperty('versionNameOverride') ?: versionProps.getProperty('VERSION_NAME', '1.1.0')).toString()
 def generatedAssetsDir = file("$buildDir/generated/tdrAssets")
-def uniboyLogoB64 = rootProject.file("app/src/main/uniboy_logo.b64")
-def uniboyIconFile = rootProject.file("app/src/main/res/drawable-nodpi/app_icon.png")
 
 android {
     namespace 'br.com.turmadorango.motoboy'
@@ -53,17 +51,6 @@ tasks.register('generateTdrVersionAsset') {
     }
 }
 
-tasks.register('prepareUniboyIcon') {
-    inputs.file uniboyLogoB64
-    outputs.file uniboyIconFile
-    doLast {
-        if (!uniboyLogoB64.exists()) throw new GradleException("UNIBOY logo base64 ausente")
-        uniboyIconFile.parentFile.mkdirs()
-        uniboyIconFile.bytes = uniboyLogoB64.text.trim().decodeBase64()
-    }
-}
-
 tasks.named('preBuild').configure {
     dependsOn tasks.named('generateTdrVersionAsset')
-    dependsOn tasks.named('prepareUniboyIcon')
 }
