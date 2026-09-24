@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -51,6 +52,7 @@ public class RealtimeService extends Service implements LocationListener {
     private LocationManager locationManager;
     private volatile Location latestLocation;
     private boolean locationUpdatesStarted = false;
+    private boolean locationForegroundPromoted = false;
     private long lastLocationPostMs = 0L;
     private String lastUniboyOfferKey = "";
 
@@ -87,7 +89,7 @@ public class RealtimeService extends Service implements LocationListener {
             return START_NOT_STICKY;
         }
         prefs.edit().putBoolean("service_enabled", true).apply();
-        startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification());
+        startBaseForeground();
         handler.removeCallbacks(pollRunnable);
         handler.postDelayed(pollRunnable, 500L);
         return START_STICKY;
@@ -104,6 +106,37 @@ public class RealtimeService extends Service implements LocationListener {
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
+
+    private void startBaseForeground() {
+        Notification n = buildServiceNotification();
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                        SERVICE_NOTIFICATION_ID,
+                        n,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                startForeground(SERVICE_NOTIFICATION_ID, n);
+            }
+        } catch (Exception e) {
+            try { startForeground(SERVICE_NOTIFICATION_ID, n); } catch (Exception ignored) {}
+        }
+    }
+
+    private void promoteLocationForegroundIfAllowed() {
+        if (locationForegroundPromoted || Build.VERSION.SDK_INT < 29) return;
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        try {
+            int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+            if (Build.VERSION.SDK_INT >= 34) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+            startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification(), type);
+            locationForegroundPromoted = true;
+        } catch (Exception ignored) {}
+    }
 
     private void schedule(long delay) {
         if (destroyed || handler == null) return;
@@ -312,6 +345,7 @@ public class RealtimeService extends Service implements LocationListener {
             return;
         }
         try {
+            promoteLocationForegroundIfAllowed();
             if (locationManager == null) locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
             if (locationManager == null) return;
 
