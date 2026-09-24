@@ -20,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId 'br.com.turmadorango.motoboy'
+        applicationId 'br.com.uniboy.entregas.moto'
         minSdk 23
         targetSdk 35
         versionCode tdrVersionCode
