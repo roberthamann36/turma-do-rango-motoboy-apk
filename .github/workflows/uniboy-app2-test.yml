@@ -1,4 +1,4 @@
-name: Build UNIBOY APP2 v29
+name: Build UNIBOY APP2 v30
 on:
   push:
     branches:
@@ -28,15 +28,15 @@ jobs:
           curl -fL --retry 3 "https://turmadorango.com.br/uploads/apps/uniboy/logo.png" -o app/src/main/res/drawable-nodpi/app_icon.png
           test -s app/src/main/res/drawable-nodpi/app_icon.png
 
-      - name: Gerar versão 29
+      - name: Gerar versão 30
         run: |
-          gradle clean assembleRelease --stacktrace -PversionCodeOverride=29 -PversionNameOverride=1.1.1
+          gradle clean assembleRelease --stacktrace -PversionCodeOverride=30 -PversionNameOverride=1.2.0
           mkdir -p build-output
-          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v29-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v30-unsigned.apk
 
       - name: Publicar APK sem assinatura
         uses: actions/upload-artifact@v4
         with:
-          name: UNIBOY-Entregas-v29-unsigned
-          path: build-output/UNIBOY-Entregas-v29-unsigned.apk
+          name: UNIBOY-Entregas-v30-unsigned
+          path: build-output/UNIBOY-Entregas-v30-unsigned.apk
           if-no-files-found: error
