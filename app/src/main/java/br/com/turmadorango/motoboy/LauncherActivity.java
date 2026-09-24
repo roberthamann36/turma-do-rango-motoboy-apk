@@ -89,7 +89,7 @@ public class LauncherActivity extends Activity {
         center.addView(logoWrap, wrapLp);
 
         TextView chip = new TextView(this);
-        chip.setText("  MOTOBOY  ");
+        chip.setText("  ENTREGADOR  ");
         chip.setTextSize(12);
         chip.setTextColor(0xFF101010);
         chip.setTypeface(Typeface.DEFAULT_BOLD);
@@ -108,7 +108,7 @@ public class LauncherActivity extends Activity {
         center.addView(chip, chipLp);
 
         titleText = new TextView(this);
-        titleText.setText("TURMA DO RANGO");
+        titleText.setText("UNIBOY ENTREGAS");
         titleText.setTextColor(Color.WHITE);
         titleText.setTextSize(29);
         titleText.setTypeface(Typeface.DEFAULT_BOLD);
@@ -123,7 +123,7 @@ public class LauncherActivity extends Activity {
         center.addView(titleText, titleLp);
 
         subtitleText = new TextView(this);
-        subtitleText.setText("Aplicativo oficial de entregas");
+        subtitleText.setText("Rede integrada de entregas");
         subtitleText.setTextColor(0xFFB9B9B9);
         subtitleText.setTextSize(15);
         subtitleText.setGravity(Gravity.CENTER);
