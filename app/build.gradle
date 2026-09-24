@@ -42,6 +42,8 @@ android {
 }
 
 tasks.register('generateTdrVersionAsset') {
+    inputs.property 'tdrVersionCode', tdrVersionCode
+    inputs.property 'tdrVersionName', tdrVersionName
     outputs.dir generatedAssetsDir
     doLast {
         generatedAssetsDir.mkdirs()
