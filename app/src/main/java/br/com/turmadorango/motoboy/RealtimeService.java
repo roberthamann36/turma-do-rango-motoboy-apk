@@ -443,8 +443,39 @@ public class RealtimeService extends Service implements LocationListener {
         }
     }
 
+    private void stopLocationUpdatesIfRunning() {
+        try {
+            if (locationManager != null && locationUpdatesStarted) {
+                locationManager.removeUpdates(this);
+            }
+        } catch (Exception ignored) {}
+        locationUpdatesStarted = false;
+        locationForegroundPromoted = false;
+    }
+
     private void pollUniboyPresence() {
         try {
+            JSONObject data = uniboyRequest("current", null);
+            if (data == null) return;
+
+            if (!data.optBoolean("ok", false)) {
+                String msg = data.optString("message", "");
+                if (msg.toLowerCase().contains("autentic")) {
+                    updateServiceNotification("Aguardando login no UNIBOY");
+                }
+                stopLocationUpdatesIfRunning();
+                cancelUniboyOfferNotification();
+                return;
+            }
+
+            boolean online = data.optBoolean("online", true);
+            if (!online) {
+                stopLocationUpdatesIfRunning();
+                updateServiceNotification("Desconectado • localização pausada");
+                cancelUniboyOfferNotification();
+                return;
+            }
+
             ensureLocationUpdates();
 
             Location loc = latestLocation;
@@ -456,27 +487,8 @@ public class RealtimeService extends Service implements LocationListener {
                 }
             }
 
-            JSONObject data = uniboyRequest("current", null);
-            if (data == null) return;
-
-            if (!data.optBoolean("ok", false)) {
-                String msg = data.optString("message", "");
-                if (msg.toLowerCase().contains("autentic")) {
-                    updateServiceNotification("Aguardando login no UNIBOY");
-                }
-                cancelUniboyOfferNotification();
-                return;
-            }
-
-            boolean online = data.optBoolean("online", true);
-            if (!online) {
-                updateServiceNotification("Desconectado • abra o app para conectar");
-                cancelUniboyOfferNotification();
-                return;
-            }
-
             String locationText = latestLocation != null
-                    ? "Conectado • localização ativa para chamadas próximas"
+                    ? "Conectado • localização de segurança ativa"
                     : "Conectado • aguardando permissão/localização";
             updateServiceNotification(locationText);
 
