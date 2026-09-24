@@ -49,8 +49,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
-    private static final String START_URL = "https://turmadorango.com.br/includes/motoboy/";
-    private static final String UPDATE_URL = "https://turmadorango.com.br/includes/motoboy/app-version.php";
+    private static final String START_URL = "https://turmadorango.com.br/includes/app2/motoboy/";
+    private static final String UPDATE_URL = "https://turmadorango.com.br/includes/app2/app-version.php";
     private static final String APK_MIME = "application/vnd.android.package-archive";
     private static final int REQ_LOCATION = 1401;
 
@@ -141,7 +141,7 @@ public class MainActivity extends Activity {
         card.setBackground(cardBg);
 
         TextView brand = new TextView(this);
-        brand.setText("TURMA DO RANGO");
+        brand.setText("UNIBOY ENTREGAS");
         brand.setTextColor(0xFFFFB900);
         brand.setTextSize(24);
         brand.setTypeface(Typeface.DEFAULT_BOLD);
@@ -256,7 +256,7 @@ public class MainActivity extends Activity {
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(s.getUserAgentString() + " TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+        s.setUserAgentString(s.getUserAgentString() + " UniBoyEntregas/" + BuildConfig.VERSION_NAME + "/" + BuildConfig.VERSION_CODE);
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
