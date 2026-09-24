@@ -1,4 +1,4 @@
-name: Build UNIBOY APP2 Update Test
+name: Build UNIBOY APP2 v27
 on:
   push:
     branches:
@@ -28,20 +28,15 @@ jobs:
           curl -fL --retry 3 "https://turmadorango.com.br/uploads/apps/uniboy/logo.png" -o app/src/main/res/drawable-nodpi/app_icon.png
           test -s app/src/main/res/drawable-nodpi/app_icon.png
 
-      - name: Gerar versão base 25
+      - name: Gerar versão 27
         run: |
-          gradle clean assembleRelease --stacktrace -PversionCodeOverride=25 -PversionNameOverride=1.0.2
+          gradle clean assembleRelease --stacktrace -PversionCodeOverride=27 -PversionNameOverride=1.0.4
           mkdir -p build-output
-          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v25-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v27-unsigned.apk
 
-      - name: Gerar atualização 26
-        run: |
-          gradle clean assembleRelease --stacktrace -PversionCodeOverride=26 -PversionNameOverride=1.0.3
-          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v26-unsigned.apk
-
-      - name: Publicar APKs sem assinatura
+      - name: Publicar APK sem assinatura
         uses: actions/upload-artifact@v4
         with:
-          name: UNIBOY-APP2-UPDATE-TEST-25-26
-          path: build-output/
+          name: UNIBOY-Entregas-v27-unsigned
+          path: build-output/UNIBOY-Entregas-v27-unsigned.apk
           if-no-files-found: error
