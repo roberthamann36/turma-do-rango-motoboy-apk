@@ -8,6 +8,10 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -26,11 +30,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 
-public class RealtimeService extends Service {
+public class RealtimeService extends Service implements LocationListener {
     public static final String ACTION_CHANGED = "br.com.turmadorango.motoboy.REALTIME_CHANGED";
     public static final String ACTION_STOP = "br.com.turmadorango.motoboy.STOP_REALTIME";
 
     private static final String REALTIME_URL = "https://turmadorango.com.br/includes/motoboy/realtime_api.php";
+    private static final String UNIBOY_API = "https://turmadorango.com.br/includes/app2/motoboy/api.php";
+    private static final int UNIBOY_CALL_NOTIFICATION_ID = 6202;
     private static final String CHANNEL_SERVICE = "tdr_motoboy_service";
     private static final String CHANNEL_ALERTS = "tdr_motoboy_alerts";
     private static final int SERVICE_NOTIFICATION_ID = 6001;
@@ -42,6 +48,11 @@ public class RealtimeService extends Service {
     private volatile boolean working = false;
     private volatile boolean destroyed = false;
     private long nextPollMs = DEFAULT_POLL_MS;
+    private LocationManager locationManager;
+    private volatile Location latestLocation;
+    private boolean locationUpdatesStarted = false;
+    private long lastLocationPostMs = 0L;
+    private String lastUniboyOfferKey = "";
 
     private final Runnable pollRunnable = new Runnable() {
         @Override public void run() {
@@ -52,7 +63,7 @@ public class RealtimeService extends Service {
             }
             working = true;
             new Thread(() -> {
-                try { pollServer(); }
+                try { pollUniboyPresence(); pollServer(); }
                 finally {
                     working = false;
                     schedule(nextPollMs);
@@ -85,6 +96,10 @@ public class RealtimeService extends Service {
     @Override public void onDestroy() {
         destroyed = true;
         if (handler != null) handler.removeCallbacksAndMessages(null);
+        try {
+            if (locationManager != null && locationUpdatesStarted) locationManager.removeUpdates(this);
+        } catch (Exception ignored) {}
+        locationUpdatesStarted = false;
         super.onDestroy();
     }
 
@@ -102,17 +117,17 @@ public class RealtimeService extends Service {
 
         NotificationChannel svc = new NotificationChannel(
                 CHANNEL_SERVICE,
-                "Monitoramento de entregas",
+                "UNIBOY conectado",
                 NotificationManager.IMPORTANCE_LOW);
-        svc.setDescription("Mantém o aplicativo do motoboy conectado para receber atualizações.");
+        svc.setDescription("Mantém o UNIBOY conectado para receber chamadas e atualizar a proximidade.");
         svc.setShowBadge(false);
         nm.createNotificationChannel(svc);
 
         NotificationChannel alerts = new NotificationChannel(
                 CHANNEL_ALERTS,
-                "Entregas e notificações",
+                "Chamadas e entregas UNIBOY",
                 NotificationManager.IMPORTANCE_HIGH);
-        alerts.setDescription("Avisos de entregas, pagamentos e abertura/fechamento do restaurante.");
+        alerts.setDescription("Chamadas de restaurantes, Turma do Rango e atualizações de entrega.");
         alerts.enableVibration(true);
         alerts.setShowBadge(true);
         nm.createNotificationChannel(alerts);
@@ -136,8 +151,8 @@ public class RealtimeService extends Service {
                 : new Notification.Builder(this);
 
         b.setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle("Turma do Rango • Motoboy conectado")
-                .setContentText("Monitorando entregas e notificações em tempo real")
+                .setContentTitle("UNIBOY ENTREGAS • conectado")
+                .setContentText("Monitorando chamadas e localização para proximidade")
                 .setContentIntent(openPi)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -160,7 +175,7 @@ public class RealtimeService extends Service {
                     ? new Notification.Builder(this,CHANNEL_SERVICE)
                     : new Notification.Builder(this);
             b.setSmallIcon(R.drawable.ic_launcher)
-                    .setContentTitle("Turma do Rango • Motoboy conectado")
+                    .setContentTitle("UNIBOY ENTREGAS • conectado")
                     .setContentText(text)
                     .setContentIntent(pi)
                     .setOngoing(true)
@@ -198,7 +213,6 @@ public class RealtimeService extends Service {
             if (code == 401 || code == 403) {
                 nextPollMs = LOGGED_OUT_POLL_MS;
                 prefs.edit().putBoolean("baseline_ready", false).apply();
-                updateServiceNotification("Aguardando login do motoboy");
                 return;
             }
             if (code < 200 || code >= 300) {
@@ -216,15 +230,12 @@ public class RealtimeService extends Service {
             if (!data.optBoolean("ok", false) || !data.optBoolean("logged", false)) {
                 nextPollMs = LOGGED_OUT_POLL_MS;
                 prefs.edit().putBoolean("baseline_ready", false).apply();
-                updateServiceNotification("Aguardando login do motoboy");
                 return;
             }
 
             nextPollMs = Math.max(2500L, data.optLong("poll_ms", DEFAULT_POLL_MS));
             boolean storeOpen = data.optBoolean("store_open", false);
-            updateServiceNotification(storeOpen
-                    ? "Chamadas ativas • restaurante aberto"
-                    : "Chamadas ativas • restaurante fechado");
+
 
             int motoboyId = data.optInt("motoboy_id", 0);
             int previousMotoboy = prefs.getInt("motoboy_id", 0);
@@ -290,6 +301,218 @@ public class RealtimeService extends Service {
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+
+    private void ensureLocationUpdates() {
+        if (locationUpdatesStarted) return;
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        try {
+            if (locationManager == null) locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+            if (locationManager == null) return;
+
+            Location best = null;
+            try {
+                Location gps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                if (gps != null) best = gps;
+            } catch (Exception ignored) {}
+            try {
+                Location net = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                if (net != null && (best == null || net.getTime() > best.getTime())) best = net;
+            } catch (Exception ignored) {}
+            try {
+                Location passive = locationManager.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
+                if (passive != null && (best == null || passive.getTime() > best.getTime())) best = passive;
+            } catch (Exception ignored) {}
+            if (best != null) latestLocation = best;
+
+            boolean registered = false;
+            try {
+                if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 8000L, 5f, this, Looper.getMainLooper());
+                    registered = true;
+                }
+            } catch (Exception ignored) {}
+            try {
+                if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 10000L, 10f, this, Looper.getMainLooper());
+                    registered = true;
+                }
+            } catch (Exception ignored) {}
+            locationUpdatesStarted = registered;
+        } catch (Exception ignored) {}
+    }
+
+    @Override public void onLocationChanged(Location location) {
+        if (location != null) latestLocation = location;
+    }
+    @Override public void onProviderEnabled(String provider) {}
+    @Override public void onProviderDisabled(String provider) {}
+    @SuppressWarnings("deprecation")
+    @Override public void onStatusChanged(String provider, int status, android.os.Bundle extras) {}
+
+    private JSONObject uniboyRequest(String action, Location location) {
+        HttpURLConnection conn = null;
+        try {
+            boolean postLocation = "location".equals(action) && location != null;
+            String endpoint = UNIBOY_API + "?action=" + URLEncoder.encode(action, "UTF-8")
+                    + "&version=" + URLEncoder.encode(BuildConfig.VERSION_NAME, "UTF-8")
+                    + "&_=" + System.currentTimeMillis();
+            URL url = new URL(endpoint);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(6500);
+            conn.setReadTimeout(6500);
+            conn.setUseCaches(false);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("User-Agent", "UniBoyEntregas/" + BuildConfig.VERSION_NAME + "/" + BuildConfig.VERSION_CODE);
+
+            String cookie = CookieManager.getInstance().getCookie("https://turmadorango.com.br/");
+            if (cookie != null && !cookie.trim().isEmpty()) conn.setRequestProperty("Cookie", cookie);
+
+            if (postLocation) {
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                String body = "latitude=" + URLEncoder.encode(String.valueOf(location.getLatitude()), "UTF-8")
+                        + "&longitude=" + URLEncoder.encode(String.valueOf(location.getLongitude()), "UTF-8")
+                        + "&accuracy=" + URLEncoder.encode(String.valueOf(location.hasAccuracy() ? location.getAccuracy() : 0f), "UTF-8")
+                        + "&version=" + URLEncoder.encode(BuildConfig.VERSION_NAME, "UTF-8");
+                try (java.io.OutputStream os = conn.getOutputStream()) {
+                    os.write(body.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+
+            int code = conn.getResponseCode();
+            String setCookie = conn.getHeaderField("Set-Cookie");
+            if (setCookie != null && !setCookie.trim().isEmpty()) {
+                CookieManager.getInstance().setCookie("https://turmadorango.com.br/", setCookie);
+                CookieManager.getInstance().flush();
+            }
+
+            java.io.InputStream is = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+            if (is == null) return null;
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) body.append(line);
+            }
+            if (body.length() == 0) return null;
+            return new JSONObject(body.toString());
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private void pollUniboyPresence() {
+        try {
+            ensureLocationUpdates();
+
+            Location loc = latestLocation;
+            long now = System.currentTimeMillis();
+            if (loc != null && now - lastLocationPostMs >= 10000L) {
+                JSONObject locationReply = uniboyRequest("location", loc);
+                if (locationReply != null && locationReply.optBoolean("ok", false)) {
+                    lastLocationPostMs = now;
+                }
+            }
+
+            JSONObject data = uniboyRequest("current", null);
+            if (data == null) return;
+
+            if (!data.optBoolean("ok", false)) {
+                String msg = data.optString("message", "");
+                if (msg.toLowerCase().contains("autentic")) {
+                    updateServiceNotification("Aguardando login no UNIBOY");
+                }
+                cancelUniboyOfferNotification();
+                return;
+            }
+
+            boolean online = data.optBoolean("online", true);
+            if (!online) {
+                updateServiceNotification("Desconectado • abra o app para conectar");
+                cancelUniboyOfferNotification();
+                return;
+            }
+
+            String locationText = latestLocation != null
+                    ? "Conectado • localização ativa para chamadas próximas"
+                    : "Conectado • aguardando permissão/localização";
+            updateServiceNotification(locationText);
+
+            JSONObject offer = data.optJSONObject("offer");
+            if (offer == null) {
+                cancelUniboyOfferNotification();
+                return;
+            }
+            showUniboyOfferNotification(offer);
+        } catch (Exception ignored) {}
+    }
+
+    private void cancelUniboyOfferNotification() {
+        try {
+            ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).cancel(UNIBOY_CALL_NOTIFICATION_ID);
+        } catch (Exception ignored) {}
+        lastUniboyOfferKey = "";
+    }
+
+    private void showUniboyOfferNotification(JSONObject offer) {
+        try {
+            String source = offer.optString("source", "app2");
+            String id = offer.optString("id", "");
+            String token = offer.optString("token", "");
+            String key = source + ":" + id + ":" + token + ":" + offer.optString("status", "");
+            if (key.equals(lastUniboyOfferKey)) return;
+            lastUniboyOfferKey = key;
+
+            String restaurant = offer.optString("restaurante", "Restaurante parceiro");
+            String destination = offer.optString("destino", "");
+            String pickup = offer.optString("coleta", "");
+            String value = "";
+            if (!"negociar".equals(offer.optString("valor_modo", "valor"))) {
+                double v = offer.optDouble("valor", offer.optDouble("pagamento_motoboy_valor", 0d));
+                value = String.format(java.util.Locale.US, " • R$ %.2f", v).replace('.', ',');
+            }
+
+            Intent open = new Intent(this, MainActivity.class);
+            open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent pi = PendingIntent.getActivity(
+                    this, 6202, open,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+            String title = "tdr".equals(source)
+                    ? "🏍 Nova chamada • Turma do Rango"
+                    : "🏍 Nova chamada • " + restaurant;
+            String text = (destination == null || destination.trim().isEmpty() ? pickup : destination) + value;
+
+            Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? new Notification.Builder(this, CHANNEL_ALERTS)
+                    : new Notification.Builder(this);
+            b.setSmallIcon(R.drawable.ic_launcher)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setStyle(new Notification.BigTextStyle().bigText(
+                            (pickup == null || pickup.isEmpty() ? "" : "Coleta: " + pickup + "\n")
+                                    + (destination == null || destination.isEmpty() ? "" : "Entrega: " + destination)
+                                    + value))
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .setCategory(Notification.CATEGORY_CALL)
+                    .setOnlyAlertOnce(false)
+                    .setWhen(System.currentTimeMillis());
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                b.setPriority(Notification.PRIORITY_HIGH);
+                b.setDefaults(Notification.DEFAULT_ALL);
+            }
+            ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).notify(
+                    UNIBOY_CALL_NOTIFICATION_ID, b.build());
+        } catch (Exception ignored) {}
     }
 
     private void processAppNotifications(JSONArray items) {
