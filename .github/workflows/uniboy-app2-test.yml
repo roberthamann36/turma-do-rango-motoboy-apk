@@ -1,4 +1,4 @@
-name: Build UNIBOY APP2 Test
+name: Build UNIBOY APP2 Update Test
 on:
   push:
     branches:
@@ -23,15 +23,25 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Aplicar logo oficial UNIBOY
+        run: |
+          curl -fL --retry 3 "https://turmadorango.com.br/uploads/apps/uniboy/logo.png" -o app/src/main/res/drawable-nodpi/app_icon.png
+          test -s app/src/main/res/drawable-nodpi/app_icon.png
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk UNIBOY-Entregas-TESTE-v24.apk
+      - name: Gerar versão base 25
+        run: |
+          gradle clean assembleRelease --stacktrace -PversionCodeOverride=25 -PversionNameOverride=1.0.2
+          mkdir -p build-output
+          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v25-unsigned.apk
 
-      - name: Upload APK
+      - name: Gerar atualização 26
+        run: |
+          gradle clean assembleRelease --stacktrace -PversionCodeOverride=26 -PversionNameOverride=1.0.3
+          cp app/build/outputs/apk/release/app-release-unsigned.apk build-output/UNIBOY-Entregas-v26-unsigned.apk
+
+      - name: Publicar APKs sem assinatura
         uses: actions/upload-artifact@v4
         with:
-          name: UNIBOY-Entregas-TESTE-v24
-          path: UNIBOY-Entregas-TESTE-v24.apk
+          name: UNIBOY-APP2-UPDATE-TEST-25-26
+          path: build-output/
           if-no-files-found: error
