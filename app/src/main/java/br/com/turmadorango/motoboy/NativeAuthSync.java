@@ -101,7 +101,7 @@ public final class NativeAuthSync {
                 conn.setUseCaches(false);
                 conn.setRequestProperty("Accept", "application/json");
                 conn.setRequestProperty("Cookie", sessionCookie);
-                conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+                conn.setRequestProperty("User-Agent", "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
                 conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
 
                 int code = conn.getResponseCode();
