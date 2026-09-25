@@ -522,6 +522,7 @@ public class MainActivity extends Activity {
                 String js = "(function(){var e=document.getElementById('tdrAppVersion');if(e)e.textContent="
                         + JSONObject.quote(versionLabel) + ";})();";
                 view.evaluateJavascript(js, null);
+                sanitizeUniboyWebUi();
                 webUiHandler.postDelayed(MainActivity.this::validateRenderedPage, 220L);
             }
 
@@ -598,6 +599,21 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void sanitizeUniboyWebUi() {
+        if (webView == null) return;
+        String js = "(function(){try{"
+                + "var st=document.getElementById('u2NativeBrandShield');"
+                + "if(!st){st=document.createElement('style');st.id='u2NativeBrandShield';"
+                + "st.textContent='body.tdr-site>header,body.tdr-site>footer,body.tdr-site>#preloader,body.tdr-site #preloader,body.tdr-site #logo,body.tdr-site .main-menu{display:none!important;visibility:hidden!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important;border:0!important;overflow:hidden!important}body.tdr-site{padding-top:0!important;margin-top:0!important}';"
+                + "(document.head||document.documentElement).appendChild(st);}"
+                + "var els=document.querySelectorAll('body *');"
+                + "for(var i=0;i<els.length;i++){var e=els[i];"
+                + "if(e.children.length===0&&e.textContent&&/Turma\\s+do\\s+Rango/i.test(e.textContent)){e.textContent=e.textContent.replace(/Turma\\s+do\\s+Rango/gi,'UNIBOY');}"
+                + "if(e.getAttribute){['alt','title','aria-label'].forEach(function(a){var v=e.getAttribute(a);if(v&&/Turma\\s+do\\s+Rango/i.test(v))e.setAttribute(a,v.replace(/Turma\\s+do\\s+Rango/gi,'UNIBOY'));});}}"
+                + "}catch(e){}})();";
+        try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
     private void registerUpdateReceiver() {
         IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
         if (Build.VERSION.SDK_INT >= 33) {
@@ -622,7 +638,7 @@ public class MainActivity extends Activity {
                 conn.setUseCaches(false);
                 conn.setRequestProperty("Accept", "application/json");
                 conn.setRequestProperty("User-Agent",
-                        "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+                        "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
 
                 int code = conn.getResponseCode();
                 if (code < 200 || code >= 300) return;
@@ -674,12 +690,12 @@ public class MainActivity extends Activity {
             File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
             if (dir == null) throw new IllegalStateException("Armazenamento não disponível");
 
-            String fileName = "TurmaDoRango-Motoboy-v" + remoteCode + ".apk";
+            String fileName = "UNIBOY-Entregas-v" + remoteCode + ".apk";
             File old = new File(dir, fileName);
             if (old.exists()) old.delete();
 
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkUrl));
-            request.setTitle("Turma do Rango Motoboy " + remoteName);
+            request.setTitle("UNIBOY ENTREGAS " + remoteName);
             request.setDescription("Baixando atualização do aplicativo...");
             request.setMimeType(APK_MIME);
             request.setAllowedOverMetered(true);
