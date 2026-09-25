@@ -248,13 +248,14 @@ public class MainActivity extends Activity {
                 scheduleWebRecovery("A conexão demorou mais que o esperado.");
             }
         };
-        webUiHandler.postDelayed(webLoadTimeoutRunnable, 14000L);
+        webUiHandler.postDelayed(webLoadTimeoutRunnable, 20000L);
     }
 
     private void loadStartPage(String reason) {
         if (webView == null || isFinishing()) return;
         cancelWebRetry();
         cancelWebWatchdog();
+        if (connectionOverlay != null) connectionOverlay.setOnClickListener(null);
         mainFrameLoading = true;
         String status = webRetryAttempt > 0
                 ? "Reconectando automaticamente... tentativa " + webRetryAttempt
@@ -272,26 +273,29 @@ public class MainActivity extends Activity {
         mainFrameLoading = false;
         cancelWebWatchdog();
         cancelWebRetry();
+
+        // Evita laço infinito de reconexão. Faz poucas tentativas automáticas e,
+        // se a rede/servidor continuar indisponível, deixa o usuário tentar de novo.
         webRetryAttempt++;
-        String detail = webRetryAttempt <= 2
-                ? "Reconectando automaticamente..."
-                : "Conexão instável. Continuaremos tentando automaticamente.";
-        showConnectionOverlay(detail);
-        long delay = Math.min(8000L, 1200L + (webRetryAttempt * 1300L));
+        if (webRetryAttempt > 3) {
+            showConnectionOverlay("Não foi possível carregar agora. Toque na tela para tentar novamente.");
+            if (connectionOverlay != null) {
+                connectionOverlay.setOnClickListener(v -> {
+                    webRetryAttempt = 0;
+                    loadStartPage("tentativa-manual");
+                });
+            }
+            return;
+        }
+
+        showConnectionOverlay("Reconectando automaticamente... tentativa " + webRetryAttempt + " de 3");
+        long delay = 1200L + (webRetryAttempt * 1200L);
         webRetryRunnable = () -> loadStartPage("recuperacao");
         webUiHandler.postDelayed(webRetryRunnable, delay);
     }
 
     private boolean isBlankUrl(String url) {
         return url == null || url.trim().isEmpty() || "about:blank".equalsIgnoreCase(url.trim());
-    }
-
-    private boolean isRoleSelectorUrl(String url) {
-        if (url == null) return false;
-        return url.contains("/includes/app2/motoboy/")
-                && !url.contains("/login.php")
-                && !url.contains("/painel.php")
-                && !url.contains("reset_role=1");
     }
 
     private void validateRenderedPage() {
@@ -301,6 +305,7 @@ public class MainActivity extends Activity {
             scheduleWebRecovery("Tela vazia.");
             return;
         }
+
         webView.evaluateJavascript(
                 "(function(){try{return document.body?document.body.innerText.trim().length:-1}catch(e){return -1}})();",
                 value -> {
@@ -310,8 +315,27 @@ public class MainActivity extends Activity {
                         String raw = String.valueOf(value).replace("\"", "").trim();
                         len = Integer.parseInt(raw);
                     } catch (Exception ignored) {}
-                    if (len == 0) {
-                        scheduleWebRecovery("Conteúdo vazio.");
+
+                    if (len == 0 && webRetryAttempt == 0) {
+                        // Algumas páginas montam o conteúdo por JavaScript logo após
+                        // onPageFinished. Espera antes de considerar a tela vazia.
+                        webUiHandler.postDelayed(() -> {
+                            if (webView == null || isFinishing()) return;
+                            webView.evaluateJavascript(
+                                    "(function(){try{return document.body?document.body.innerText.trim().length:-1}catch(e){return -1}})();",
+                                    second -> {
+                                        try {
+                                            String raw2 = String.valueOf(second).replace("\"", "").trim();
+                                            if (Integer.parseInt(raw2) == 0) scheduleWebRecovery("Conteúdo vazio.");
+                                            else {
+                                                webRetryAttempt = 0;
+                                                hideConnectionOverlay();
+                                            }
+                                        } catch (Exception ignored) {
+                                            hideConnectionOverlay();
+                                        }
+                                    });
+                        }, 1600L);
                     } else {
                         webRetryAttempt = 0;
                         hideConnectionOverlay();
@@ -323,33 +347,17 @@ public class MainActivity extends Activity {
         if (webView == null || isFinishing()) return;
         webUiHandler.postDelayed(() -> {
             if (webView == null || isFinishing()) return;
+
+            // Na primeira abertura o onResume acontece enquanto a página ainda está
+            // carregando. Não reinicia o WebView nesse momento.
+            if (mainFrameLoading || lastPageFinishedAt == 0L) return;
+
             String url = webView.getUrl();
             if (isBlankUrl(url)) {
-                webRetryAttempt = Math.max(1, webRetryAttempt);
+                webRetryAttempt = 0;
                 loadStartPage("retorno-tela-vazia");
-                return;
             }
-
-            // Se por algum motivo ficou parado na escolha de perfil, refaz o
-            // bootstrap no servidor. Usuários com sessão/lembrar-me voltam direto.
-            if (isRoleSelectorUrl(url)) {
-                loadStartPage("retorno-seletor");
-                return;
-            }
-
-            // Detecta WebView visivelmente vazio depois de voltar do segundo plano.
-            webView.evaluateJavascript(
-                    "(function(){try{return document.body?document.body.innerText.trim().length:-1}catch(e){return -1}})();",
-                    value -> {
-                        try {
-                            String raw = String.valueOf(value).replace("\"", "").trim();
-                            if (Integer.parseInt(raw) == 0) {
-                                webRetryAttempt = Math.max(1, webRetryAttempt);
-                                loadStartPage("retorno-conteudo-vazio");
-                            }
-                        } catch (Exception ignored) {}
-                    });
-        }, 450L);
+        }, 900L);
     }
 
     private void createUpdateOverlay() {
