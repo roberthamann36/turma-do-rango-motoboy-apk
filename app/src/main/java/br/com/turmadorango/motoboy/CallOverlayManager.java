@@ -199,7 +199,7 @@ public final class CallOverlayManager {
         declineLp.topMargin = dp(app, 12);
         card.addView(decline, declineLp);
 
-        TextView footer = text(app, "Turma do Rango • Motoboy", 13, 0xFF777777, false);
+        TextView footer = text(app, "UNIBOY ENTREGAS", 13, 0xFF777777, false);
         footer.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams footerLp = match();
         footerLp.topMargin = dp(app, 20);
