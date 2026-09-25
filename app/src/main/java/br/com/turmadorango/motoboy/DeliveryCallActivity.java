@@ -211,7 +211,7 @@ public class DeliveryCallActivity extends Activity {
         declineLp.topMargin = dp(12);
         card.addView(decline, declineLp);
 
-        TextView footer = text("Turma do Rango • Motoboy", 13, 0xFF777777, false);
+        TextView footer = text("UNIBOY ENTREGAS", 13, 0xFF777777, false);
         footer.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams fLp = lpMatch();
         fLp.topMargin = dp(20);
