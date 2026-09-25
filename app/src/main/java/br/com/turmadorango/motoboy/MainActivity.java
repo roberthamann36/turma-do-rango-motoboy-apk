@@ -307,7 +307,7 @@ public class MainActivity extends Activity {
                     if (isFinishing()) return;
                     int len = -1;
                     try {
-                        String raw = String.valueOf(value).replace("\\\"", "").trim();
+                        String raw = String.valueOf(value).replace("\"", "").trim();
                         len = Integer.parseInt(raw);
                     } catch (Exception ignored) {}
                     if (len == 0) {
@@ -342,7 +342,7 @@ public class MainActivity extends Activity {
                     "(function(){try{return document.body?document.body.innerText.trim().length:-1}catch(e){return -1}})();",
                     value -> {
                         try {
-                            String raw = String.valueOf(value).replace("\\\"", "").trim();
+                            String raw = String.valueOf(value).replace("\"", "").trim();
                             if (Integer.parseInt(raw) == 0) {
                                 webRetryAttempt = Math.max(1, webRetryAttempt);
                                 loadStartPage("retorno-conteudo-vazio");
