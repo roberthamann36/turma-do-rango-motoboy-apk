@@ -154,7 +154,7 @@ public final class DeliveryCallManager {
 
         if (Build.VERSION.SDK_INT >= 31) {
             Person caller = new Person.Builder()
-                    .setName("Turma do Rango • Nova entrega")
+                    .setName("UNIBOY • Nova entrega")
                     .setImportant(true)
                     .build();
             b.setStyle(Notification.CallStyle.forIncomingCall(caller, declinePi, acceptPi));
