@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
  */
 public final class OnlineUpdateManager {
     private static final String VERSION_URL =
-            "https://turmadorango.com.br/includes/motoboy/app-online-version.php";
+            "https://turmadorango.com.br/includes/app2/app-online-version.php";
     private static final String PREFS = "tdr_online_update";
     private static final long POLL_MS = 20_000L;
     private static final long ERROR_POLL_MS = 60_000L;
@@ -98,7 +98,7 @@ public final class OnlineUpdateManager {
                 conn.setRequestProperty("X-TDR-App-Token", appToken);
                 conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
                 conn.setRequestProperty("User-Agent",
-                        "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+                        "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
 
                 int code = conn.getResponseCode();
                 if (code < 200 || code >= 300) {
