@@ -49,7 +49,7 @@ public class DeliveryCallReceiver extends BroadcastReceiver {
             conn.setUseCaches(false);
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-            conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+            conn.setRequestProperty("User-Agent", "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
 
             String appToken = context.getSharedPreferences("tdr_app_auth", Context.MODE_PRIVATE)
                     .getString("app_token", "").trim();
