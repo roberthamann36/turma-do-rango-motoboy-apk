@@ -160,7 +160,7 @@ public class RealtimeService extends Service implements LocationListener {
                 CHANNEL_ALERTS,
                 "Chamadas e entregas UNIBOY",
                 NotificationManager.IMPORTANCE_HIGH);
-        alerts.setDescription("Chamadas de restaurantes, Turma do Rango e atualizações de entrega.");
+        alerts.setDescription("Chamadas de restaurantes e atualizações de entrega do UNIBOY.");
         alerts.enableVibration(true);
         alerts.setShowBadge(true);
         nm.createNotificationChannel(alerts);
@@ -235,7 +235,7 @@ public class RealtimeService extends Service implements LocationListener {
             conn.setReadTimeout(7000);
             conn.setUseCaches(false);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+            conn.setRequestProperty("User-Agent", "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
             conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
             if (!appToken.isEmpty()) conn.setRequestProperty("X-TDR-App-Token", appToken);
 
@@ -533,7 +533,7 @@ public class RealtimeService extends Service implements LocationListener {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
             String title = "tdr".equals(source)
-                    ? "🏍 Nova chamada • Turma do Rango"
+                    ? "🏍 Nova chamada • UNIBOY"
                     : "🏍 Nova chamada • " + restaurant;
             String text = (destination == null || destination.trim().isEmpty() ? pickup : destination) + value;
 
