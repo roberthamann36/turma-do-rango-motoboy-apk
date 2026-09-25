@@ -50,8 +50,8 @@ public class MotoboyApplication extends Application implements Application.Activ
             return;
         }
         String url = web.getUrl();
-        if (url == null || !url.contains("/includes/motoboy/tela_motoboy.php")) {
-            retryLater();
+        if (url == null || !url.contains("/includes/app2/")) {
+            pendingRefresh = false;
             return;
         }
 
@@ -92,7 +92,6 @@ public class MotoboyApplication extends Application implements Application.Activ
         EmbeddedCallMonitor.kick(this);
         OnlineUpdateManager.check(this);
         if (activity instanceof MainActivity) {
-            CommunicationGuard.install(activity);
             handler.postDelayed(() -> CallPermissionManager.ensure(activity), 700L);
         }
         refreshVisibleWebView();
@@ -109,7 +108,6 @@ public class MotoboyApplication extends Application implements Application.Activ
 
     @Override public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
         if (activity instanceof MainActivity) {
-            handler.post(() -> CommunicationGuard.install(activity));
             handler.postDelayed(() -> NativeAuthSync.syncNow(this), 900L);
             handler.postDelayed(() -> DeliveryCallManager.kick(this), 1100L);
             handler.postDelayed(() -> EmbeddedCallMonitor.kick(this), 1200L);
