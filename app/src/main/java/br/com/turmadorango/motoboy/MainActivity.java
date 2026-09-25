@@ -30,6 +30,8 @@ import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -57,6 +59,15 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private WebView webView;
     private ProgressBar progressBar;
+
+    private FrameLayout connectionOverlay;
+    private TextView connectionStatusText;
+    private final Handler webUiHandler = new Handler(Looper.getMainLooper());
+    private Runnable webLoadTimeoutRunnable;
+    private Runnable webRetryRunnable;
+    private int webRetryAttempt = 0;
+    private boolean mainFrameLoading = false;
+    private long lastPageFinishedAt = 0L;
     private GeolocationPermissions.Callback pendingGeoCallback;
     private String pendingGeoOrigin;
 
@@ -98,6 +109,7 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(0xFF050505);
         webView = new WebView(this);
+        webView.setBackgroundColor(0xFF050505);
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
 
@@ -110,16 +122,234 @@ public class MainActivity extends Activity {
         progressParams.gravity = Gravity.TOP;
         root.addView(progressBar, progressParams);
 
+        createConnectionOverlay();
         createUpdateOverlay();
         setContentView(root);
 
         registerUpdateReceiver();
         configureWebView();
 
-        if (savedInstanceState == null) webView.loadUrl(START_URL);
-        else webView.restoreState(savedInstanceState);
+        // Sempre inicia por uma rota nova. Restaurar o estado antigo do WebView
+        // podia trazer de volta uma tela branca ou a escolha de perfil já obsoleta.
+        loadStartPage("abertura");
 
         checkForUpdate();
+    }
+
+    private void createConnectionOverlay() {
+        connectionOverlay = new FrameLayout(this);
+        connectionOverlay.setBackgroundColor(0xFF050505);
+        connectionOverlay.setClickable(true);
+        connectionOverlay.setFocusable(true);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.setPadding(dp(24), dp(24), dp(24), dp(24));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF111111);
+        bg.setCornerRadius(dp(22));
+        bg.setStroke(dp(2), 0xFFFFC400);
+        card.setBackground(bg);
+
+        TextView title = new TextView(this);
+        title.setText("UNIBOY ENTREGAS");
+        title.setTextColor(0xFFFFC400);
+        title.setTextSize(22);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        card.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        ProgressBar loading = new ProgressBar(this);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                && loading.getIndeterminateDrawable() != null) {
+            loading.getIndeterminateDrawable().setTint(0xFFFFC400);
+        }
+        LinearLayout.LayoutParams loadLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        loadLp.topMargin = dp(18);
+        card.addView(loading, loadLp);
+
+        connectionStatusText = new TextView(this);
+        connectionStatusText.setText("Abrindo seu painel...");
+        connectionStatusText.setTextColor(Color.WHITE);
+        connectionStatusText.setTextSize(15);
+        connectionStatusText.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusLp.topMargin = dp(14);
+        card.addView(connectionStatusText, statusLp);
+
+        TextView note = new TextView(this);
+        note.setText("Se a conexão oscilar, o app tenta novamente sozinho.");
+        note.setTextColor(0xFF999999);
+        note.setTextSize(12);
+        note.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        noteLp.topMargin = dp(8);
+        card.addView(note, noteLp);
+
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.gravity = Gravity.CENTER;
+        cardLp.leftMargin = dp(24);
+        cardLp.rightMargin = dp(24);
+        connectionOverlay.addView(card, cardLp);
+
+        root.addView(connectionOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showConnectionOverlay(String text) {
+        runOnUiThread(() -> {
+            if (connectionOverlay == null) return;
+            if (connectionStatusText != null && text != null && !text.trim().isEmpty()) {
+                connectionStatusText.setText(text);
+            }
+            connectionOverlay.setVisibility(View.VISIBLE);
+            connectionOverlay.bringToFront();
+            if (updateOverlay != null && updateOverlay.getVisibility() == View.VISIBLE) {
+                updateOverlay.bringToFront();
+            }
+        });
+    }
+
+    private void hideConnectionOverlay() {
+        runOnUiThread(() -> {
+            if (connectionOverlay != null) connectionOverlay.setVisibility(View.GONE);
+        });
+    }
+
+    private void cancelWebWatchdog() {
+        if (webLoadTimeoutRunnable != null) {
+            webUiHandler.removeCallbacks(webLoadTimeoutRunnable);
+            webLoadTimeoutRunnable = null;
+        }
+    }
+
+    private void cancelWebRetry() {
+        if (webRetryRunnable != null) {
+            webUiHandler.removeCallbacks(webRetryRunnable);
+            webRetryRunnable = null;
+        }
+    }
+
+    private void scheduleWebWatchdog() {
+        cancelWebWatchdog();
+        webLoadTimeoutRunnable = () -> {
+            if (mainFrameLoading && !isFinishing()) {
+                scheduleWebRecovery("A conexão demorou mais que o esperado.");
+            }
+        };
+        webUiHandler.postDelayed(webLoadTimeoutRunnable, 14000L);
+    }
+
+    private void loadStartPage(String reason) {
+        if (webView == null || isFinishing()) return;
+        cancelWebRetry();
+        cancelWebWatchdog();
+        mainFrameLoading = true;
+        String status = webRetryAttempt > 0
+                ? "Reconectando automaticamente... tentativa " + webRetryAttempt
+                : "Abrindo seu painel...";
+        showConnectionOverlay(status);
+        try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
+        try { webView.stopLoading(); } catch (Exception ignored) {}
+        String sep = START_URL.contains("?") ? "&" : "?";
+        webView.loadUrl(START_URL + sep + "_appopen=" + System.currentTimeMillis());
+        scheduleWebWatchdog();
+    }
+
+    private void scheduleWebRecovery(String reason) {
+        if (isFinishing()) return;
+        mainFrameLoading = false;
+        cancelWebWatchdog();
+        cancelWebRetry();
+        webRetryAttempt++;
+        String detail = webRetryAttempt <= 2
+                ? "Reconectando automaticamente..."
+                : "Conexão instável. Continuaremos tentando automaticamente.";
+        showConnectionOverlay(detail);
+        long delay = Math.min(8000L, 1200L + (webRetryAttempt * 1300L));
+        webRetryRunnable = () -> loadStartPage("recuperacao");
+        webUiHandler.postDelayed(webRetryRunnable, delay);
+    }
+
+    private boolean isBlankUrl(String url) {
+        return url == null || url.trim().isEmpty() || "about:blank".equalsIgnoreCase(url.trim());
+    }
+
+    private boolean isRoleSelectorUrl(String url) {
+        if (url == null) return false;
+        return url.contains("/includes/app2/motoboy/")
+                && !url.contains("/login.php")
+                && !url.contains("/painel.php")
+                && !url.contains("reset_role=1");
+    }
+
+    private void validateRenderedPage() {
+        if (webView == null || isFinishing()) return;
+        String url = webView.getUrl();
+        if (isBlankUrl(url)) {
+            scheduleWebRecovery("Tela vazia.");
+            return;
+        }
+        webView.evaluateJavascript(
+                "(function(){try{return document.body?document.body.innerText.trim().length:-1}catch(e){return -1}})();",
+                value -> {
+                    if (isFinishing()) return;
+                    int len = -1;
+                    try {
+                        String raw = String.valueOf(value).replace(""", "").trim();
+                        len = Integer.parseInt(raw);
+                    } catch (Exception ignored) {}
+                    if (len == 0) {
+                        scheduleWebRecovery("Conteúdo vazio.");
+                    } else {
+                        webRetryAttempt = 0;
+                        hideConnectionOverlay();
+                    }
+                });
+    }
+
+    private void checkPageHealthOnResume() {
+        if (webView == null || isFinishing()) return;
+        webUiHandler.postDelayed(() -> {
+            if (webView == null || isFinishing()) return;
+            String url = webView.getUrl();
+            if (isBlankUrl(url)) {
+                webRetryAttempt = Math.max(1, webRetryAttempt);
+                loadStartPage("retorno-tela-vazia");
+                return;
+            }
+
+            // Se por algum motivo ficou parado na escolha de perfil, refaz o
+            // bootstrap no servidor. Usuários com sessão/lembrar-me voltam direto.
+            if (isRoleSelectorUrl(url)) {
+                loadStartPage("retorno-seletor");
+                return;
+            }
+
+            // Detecta WebView visivelmente vazio depois de voltar do segundo plano.
+            webView.evaluateJavascript(
+                    "(function(){try{return document.body?document.body.innerText.trim().length:-1}catch(e){return -1}})();",
+                    value -> {
+                        try {
+                            String raw = String.valueOf(value).replace(""", "").trim();
+                            if (Integer.parseInt(raw) == 0) {
+                                webRetryAttempt = Math.max(1, webRetryAttempt);
+                                loadStartPage("retorno-conteudo-vazio");
+                            }
+                        } catch (Exception ignored) {}
+                    });
+        }, 450L);
     }
 
     private void createUpdateOverlay() {
@@ -276,16 +506,40 @@ public class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 progressBar.setVisibility(View.VISIBLE);
+                mainFrameLoading = true;
+                scheduleWebWatchdog();
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 progressBar.setVisibility(View.GONE);
+                mainFrameLoading = false;
+                lastPageFinishedAt = System.currentTimeMillis();
+                cancelWebWatchdog();
+                cancelWebRetry();
                 CookieManager.getInstance().flush();
                 String versionLabel = "Versão " + BuildConfig.VERSION_NAME;
                 String js = "(function(){var e=document.getElementById('tdrAppVersion');if(e)e.textContent="
                         + JSONObject.quote(versionLabel) + ";})();";
                 view.evaluateJavascript(js, null);
+                webUiHandler.postDelayed(MainActivity.this::validateRenderedPage, 220L);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request != null && request.isForMainFrame()) {
+                    scheduleWebRecovery("Falha ao carregar o painel.");
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+                super.onReceivedHttpError(view, request, errorResponse);
+                if (request != null && request.isForMainFrame()
+                        && errorResponse != null && errorResponse.getStatusCode() >= 500) {
+                    scheduleWebRecovery("Servidor temporariamente indisponível.");
+                }
             }
         });
 
@@ -730,7 +984,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        webView.saveState(outState);
+        // Não persiste a navegação do WebView. Uma nova abertura sempre passa
+        // pelo bootstrap de sessão e evita restaurar tela branca/seletor antigo.
         super.onSaveInstanceState(outState);
     }
 
@@ -738,6 +993,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (webView != null) webView.onResume();
+        checkPageHealthOnResume();
 
         if (pendingInstallUri != null
                 && waitingUnknownSourcesPermission
@@ -760,6 +1016,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         stopDownloadProgressMonitor();
         updateUiHandler.removeCallbacksAndMessages(null);
+        webUiHandler.removeCallbacksAndMessages(null);
 
         if (receiverRegistered) {
             try {
