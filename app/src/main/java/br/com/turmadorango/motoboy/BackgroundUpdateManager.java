@@ -30,7 +30,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public final class BackgroundUpdateManager {
-    private static final String UPDATE_URL = "https://turmadorango.com.br/includes/motoboy/app-version.php";
+    private static final String UPDATE_URL = "https://turmadorango.com.br/includes/app2/app-version.php";
     private static final String PREFS = "tdr_bg_update";
     private static final String CHANNEL = "tdr_motoboy_updates_v2";
     private static final long CHECK_INTERVAL = 2 * 60 * 1000L;
@@ -119,7 +119,7 @@ public final class BackgroundUpdateManager {
                 conn.setReadTimeout(7000);
                 conn.setUseCaches(false);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+                conn.setRequestProperty("User-Agent", "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
                 int code = conn.getResponseCode();
                 if (code < 200 || code >= 300) return;
 
@@ -155,12 +155,12 @@ public final class BackgroundUpdateManager {
             String apkUrl = data.optString("apk_url", "");
             File dir = app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
             if (dir == null) return;
-            String fileName = "TurmaDoRango-Motoboy-v" + remoteCode + ".apk";
+            String fileName = "UNIBOY-Entregas-v" + remoteCode + ".apk";
             File old = new File(dir, fileName);
             if (old.exists()) old.delete();
 
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkUrl));
-            request.setTitle("Turma do Rango Motoboy " + remoteName);
+            request.setTitle("UNIBOY ENTREGAS " + remoteName);
             request.setDescription("Baixando atualização automaticamente...");
             request.setMimeType("application/vnd.android.package-archive");
             request.setAllowedOverMetered(true);
