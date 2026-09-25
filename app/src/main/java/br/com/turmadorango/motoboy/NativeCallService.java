@@ -145,7 +145,7 @@ public class NativeCallService extends Service {
                 ? new Notification.Builder(this, CHANNEL_MONITOR)
                 : new Notification.Builder(this);
         b.setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle("Turma do Rango • Chamadas")
+                .setContentTitle("UNIBOY ENTREGAS • Chamadas")
                 .setContentText(text)
                 .setContentIntent(pi)
                 .setOngoing(true)
@@ -187,7 +187,7 @@ public class NativeCallService extends Service {
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("X-TDR-App-Token", appToken);
             conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
-            conn.setRequestProperty("User-Agent", "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+            conn.setRequestProperty("User-Agent", "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
 
             int code = conn.getResponseCode();
             if (code == 401 || code == 403) {
