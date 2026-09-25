@@ -110,7 +110,7 @@ public final class EmbeddedCallMonitor {
             conn.setRequestProperty("X-TDR-App-Token", appToken);
             conn.setRequestProperty("X-TDR-App-Version", BuildConfig.VERSION_NAME);
             conn.setRequestProperty("User-Agent",
-                    "TurmaDoRangoMotoboyApp/" + BuildConfig.VERSION_NAME);
+                    "UniBoyEntregas/" + BuildConfig.VERSION_NAME);
 
             int code = conn.getResponseCode();
             if (code == 401 || code == 403) {
