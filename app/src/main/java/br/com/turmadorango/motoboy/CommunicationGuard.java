@@ -99,7 +99,7 @@ public final class CommunicationGuard {
         card.setBackground(cardBg);
 
         TextView brand = new TextView(activity);
-        brand.setText("TURMA DO RANGO");
+        brand.setText("UNIBOY ENTREGAS");
         brand.setTextColor(0xFFFFC400);
         brand.setTextSize(24);
         brand.setTypeface(Typeface.DEFAULT_BOLD);
